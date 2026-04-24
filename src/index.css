@@ -1,0 +1,22 @@
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: 'Yu Gothic', 'Hiragino Kaku Gothic Pro', 'Segoe UI', sans-serif;
+  background: #f5f7fb;
+  color: #1e2532;
+}
+
+button {
+  font: inherit;
+}
+
+input, select {
+  font: inherit;
+}

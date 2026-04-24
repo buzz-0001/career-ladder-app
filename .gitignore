@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+.DS_Store
+.vscode/
+*.db
+*.db-shm
+*.db-wal
+
+# 開発中の作業ファイル
+debug_*.txt
+debug_*.json
+excel-summary.json
+extract_*.py
+leader_*.json
+pdfminer_query_snippets.txt
+scripts/
