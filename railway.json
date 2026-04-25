@@ -5,8 +5,7 @@
     "buildCommand": "npm install && npm run build"
   },
   "deploy": {
-    "startCommand": "npm run start",
-    "healthcheckPath": "/api/employees",
+    "startCommand": "NODE_ENV=production tsx server/index.ts",
     "restartPolicyType": "ON_FAILURE"
   }
 }
