@@ -11,9 +11,9 @@ import {
   LinearScale,
 } from 'chart.js';
 import { Radar, Line } from 'react-chartjs-2';
-import type { Category, Employee, EvaluationRecord, EvaluationRole, User } from '../types';
+import type { Category, Employee, EvaluationRecord, EvaluationRole, Score, User } from '../types';
 import { apiLoadEvaluations } from '../utils/api';
-import { calcCategoryScore, calcTotalScore } from '../utils/scoring';
+import { calcCategoryScore, calcTotalScore, flattenCategoryItems } from '../utils/scoring';
 
 ChartJS.register(RadialLinearScale, PointElement, LineElement, Filler, Tooltip, Legend, CategoryScale, LinearScale);
 
@@ -43,17 +43,26 @@ function formatMonthLabel(value: string) {
   return `${year}年${month}月`;
 }
 
-function Dashboard({ employeeId, employeeName, onEmployeeChange, categories, employees, user }: DashboardProps) {
+function scoreLabel(score: Score | undefined): string {
+  if (score === undefined) return '-';
+  if (score === 'excluded') return '除外';
+  return String(score);
+}
+
+function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }: DashboardProps) {
   const [evaluations, setEvaluations] = useState<EvaluationRecord[]>([]);
   const [role, setRole] = useState<EvaluationRole>('self');
-  const [summaryText, setSummaryText] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
-  const [fetching, setFetching] = useState(false);
   const [lineMetricId, setLineMetricId] = useState('total');
 
   useEffect(() => {
     apiLoadEvaluations().then(setEvaluations).catch(console.error);
   }, []);
+
+  // 対象者・評価種別が変わったら詳細を閉じる
+  useEffect(() => {
+    setSelectedCategoryId(null);
+  }, [employeeId, role]);
 
   const filteredRecords = useMemo(
     () => evaluations.filter((r) => r.employeeId === employeeId && r.role === role),
@@ -142,26 +151,19 @@ function Dashboard({ employeeId, employeeName, onEmployeeChange, categories, emp
     };
   }, [months, sortedRecords, lineMetricId, lineMetricOptions, categories]);
 
-  const handleFetchSummary = async () => {
-    if (!latestRecord) return;
-    setFetching(true);
-    setSummaryText('AI要約を生成中です...');
-    try {
-      const response = await fetch('/api/summary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ employeeName, role, latestRecord, trend: sortedRecords.slice(0, 6) }),
-      });
-      const result = await response.json();
-      setSummaryText(result.summary ?? '要約の取得に失敗しました。');
-    } catch {
-      setSummaryText('AI要約の取得中にエラーが発生しました。');
-    } finally {
-      setFetching(false);
-    }
-  };
-
   const selectedCategory = categories.find((c) => c.id === selectedCategoryId) ?? null;
+
+  // 詳細表示: 直近4回 × flattenしたアイテム
+  const detailRecords = useMemo(() => sortedRecords.slice(0, 4).reverse(), [sortedRecords]);
+
+  const detailItems = useMemo(() => {
+    if (!selectedCategory || !latestRecord) return [];
+    const levelCat = {
+      ...selectedCategory,
+      subItems: selectedCategory.subItems.filter((s) => s.level === latestRecord.level),
+    };
+    return flattenCategoryItems(levelCat);
+  }, [selectedCategory, latestRecord]);
 
   return (
     <section className="card">
@@ -248,71 +250,64 @@ function Dashboard({ employeeId, employeeName, onEmployeeChange, categories, emp
             </section>
 
             <section className="category-card">
-              <h3>AI要約</h3>
-              <button type="button" onClick={handleFetchSummary} disabled={fetching} style={{ marginBottom: 16 }}>
-                {fetching ? '生成中...' : 'AI要約を取得する'}
-              </button>
-              <div className="summary-text">{summaryText || '最新評価と推移をもとに成長ポイントと課題を表示します。'}</div>
-            </section>
-
-            <section className="category-card">
               <h3>詳細分析</h3>
               <div className="data-grid">
                 {categories.map((cat) => (
-                  <div key={cat.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                  <div key={cat.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                     <span>{cat.title}</span>
-                    <button type="button" onClick={() => setSelectedCategoryId(cat.id)}>詳細</button>
+                    <button
+                      type="button"
+                      className={selectedCategoryId === cat.id ? 'primary-button' : ''}
+                      onClick={() => setSelectedCategoryId(selectedCategoryId === cat.id ? null : cat.id)}
+                    >
+                      {selectedCategoryId === cat.id ? '閉じる' : '詳細'}
+                    </button>
                   </div>
                 ))}
               </div>
             </section>
           </div>
+
+          {selectedCategory && detailItems.length > 0 && (
+            <section className="category-card" style={{ marginTop: 16 }}>
+              <h3>{selectedCategory.title} の小項目スコア推移（直近{detailRecords.length}回）</h3>
+              <div className="admin-table-wrapper">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>小項目</th>
+                      {detailRecords.map((r) => (
+                        <th key={r.month}>{formatMonthLabel(r.month)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detailItems.map((item) => (
+                      <tr key={item.id}>
+                        <td style={{ maxWidth: 200, whiteSpace: 'normal', fontSize: '0.8rem' }}>{item.title}</td>
+                        {detailRecords.map((r) => (
+                          <td key={r.month} style={{ textAlign: 'center', fontWeight: 600 }}>
+                            {scoreLabel(r.scores[item.id])}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
+          {selectedCategory && detailItems.length === 0 && (
+            <section className="category-card" style={{ marginTop: 16 }}>
+              <p className="small-text">現在のレベルに表示できる項目がありません。</p>
+            </section>
+          )}
         </>
       ) : (
         <div className="category-card">
           <p>この対象者・評価種別にはまだ記録がありません。評価入力タブからデータを追加してください。</p>
         </div>
-      )}
-
-      {selectedCategory && (
-        <section className="category-card">
-          <h3>{selectedCategory.title} の小項目履歴</h3>
-          {months.length === 0 ? (
-            <p>履歴がありません。</p>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  <th style={{ textAlign: 'left', padding: '10px', borderBottom: '1px solid #e2e8f0' }}>年月</th>
-                  {selectedCategory.subItems
-                    .filter((item) => item.level === latestRecord?.level)
-                    .map((sub) => (
-                      <th key={sub.id} style={{ textAlign: 'left', padding: '10px', borderBottom: '1px solid #e2e8f0' }}>
-                        {sub.title}
-                      </th>
-                    ))}
-                </tr>
-              </thead>
-              <tbody>
-                {months.map((m) => {
-                  const record = sortedRecords.find((r) => r.month === m);
-                  return (
-                    <tr key={m}>
-                      <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9' }}>{formatMonthLabel(m)}</td>
-                      {selectedCategory.subItems
-                        .filter((item) => item.level === latestRecord?.level)
-                        .map((sub) => (
-                          <td key={sub.id} style={{ padding: '10px', borderBottom: '1px solid #f1f5f9' }}>
-                            {record ? (record.scores[sub.id] ?? '-') : '-'}
-                          </td>
-                        ))}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </section>
       )}
     </section>
   );
