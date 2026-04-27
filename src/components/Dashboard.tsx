@@ -240,11 +240,11 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
           <div className="data-grid">
             <section className="category-card">
               <h3>前回・今回 比較レーダーチャート</h3>
-              <div className="chart-box">
+              <div className="chart-box-radar">
                 <Radar
                   data={radarData}
                   options={{
-                    aspectRatio: 2.0,
+                    maintainAspectRatio: false,
                     scales: {
                       r: {
                         suggestedMin: 0,
@@ -265,12 +265,12 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
                   {lineMetricOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
                 </select>
               </div>
-              <div className="chart-box">
+              <div className="chart-box-line">
                 <Line
                   data={lineData}
                   options={{
                     responsive: true,
-                    aspectRatio: 4.0,
+                    maintainAspectRatio: false,
                     plugins: { legend: { position: 'bottom' } },
                     scales: {
                       y: {
@@ -285,34 +285,6 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
                 />
               </div>
             </section>
-
-            {hasCommentData && (
-              <section className="category-card">
-                <div className="comment-section-header">今後挑戦したいこと / 挑戦してほしいこと</div>
-                <div className="comment-two-col">
-                  <div className="comment-cell">
-                    <div className="comment-cell-label">本人</div>
-                    <div className="comment-cell-text">
-                      {latestSelfRecord?.challenge || <span className="comment-cell-empty">まだ記入されていません</span>}
-                    </div>
-                  </div>
-                  <div className="comment-cell">
-                    <div className="comment-cell-label">管理者</div>
-                    <div className="comment-cell-text">
-                      {latestAdminRecord?.adminChallenge || <span className="comment-cell-empty">まだ記入されていません</span>}
-                    </div>
-                  </div>
-                </div>
-                <div className="comment-section-header">チーム・会社への意見や相談</div>
-                <div className="comment-cell-text">
-                  {latestAdminRecord?.teamOpinion || <span className="comment-cell-empty">まだ記入されていません</span>}
-                </div>
-                <div className="comment-section-header">フィードバック内容</div>
-                <div className="comment-cell-text">
-                  {latestAdminRecord?.feedback || <span className="comment-cell-empty">まだ記入されていません</span>}
-                </div>
-              </section>
-            )}
 
             <section className="category-card">
               <h3>詳細分析</h3>
@@ -380,6 +352,34 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
         <div className="category-card">
           <p>この対象者・評価種別にはまだ記録がありません。評価入力タブからデータを追加してください。</p>
         </div>
+      )}
+
+      {hasCommentData && (
+        <section className="category-card">
+          <div className="comment-section-header">今後挑戦したいこと / 挑戦してほしいこと</div>
+          <div className="comment-two-col">
+            <div className="comment-cell">
+              <div className="comment-cell-label">本人</div>
+              <div className="comment-cell-text">
+                {latestSelfRecord?.challenge || <span className="comment-cell-empty">まだ記入されていません</span>}
+              </div>
+            </div>
+            <div className="comment-cell">
+              <div className="comment-cell-label">管理者</div>
+              <div className="comment-cell-text">
+                {latestAdminRecord?.adminChallenge || <span className="comment-cell-empty">まだ記入されていません</span>}
+              </div>
+            </div>
+          </div>
+          <div className="comment-section-header">チーム・会社への意見や相談</div>
+          <div className="comment-cell-text">
+            {latestAdminRecord?.teamOpinion || <span className="comment-cell-empty">まだ記入されていません</span>}
+          </div>
+          <div className="comment-section-header">フィードバック内容</div>
+          <div className="comment-cell-text">
+            {latestAdminRecord?.feedback || <span className="comment-cell-empty">まだ記入されていません</span>}
+          </div>
+        </section>
       )}
     </section>
   );

@@ -95,7 +95,7 @@
 }
 
 .field select,
-.field input {
+.field input:not([type="radio"]):not([type="checkbox"]) {
   width: 100%;
   border: 1px solid #cbd5e1;
   border-radius: 12px;
@@ -361,8 +361,29 @@
   margin-bottom: 24px;
 }
 
-.chart-box {
+.chart-box-radar,
+.chart-box-line {
   width: 100%;
+}
+
+/* スマホ: 大きめに表示 */
+.chart-box-radar {
+  aspect-ratio: 1 / 1;
+}
+
+.chart-box-line {
+  aspect-ratio: 2 / 1;
+}
+
+/* PC: コンパクトに表示 */
+@media (min-width: 900px) {
+  .chart-box-radar {
+    aspect-ratio: 2 / 1;
+  }
+
+  .chart-box-line {
+    aspect-ratio: 4 / 1;
+  }
 }
 
 .score-display {
