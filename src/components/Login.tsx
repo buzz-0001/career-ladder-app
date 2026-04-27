@@ -46,13 +46,7 @@ function Login({ onLogin }: LoginProps) {
           {loading ? 'ログイン中...' : 'ログイン'}
         </button>
       </form>
-      <div className="small-text">
-        <p>デモアカウント:</p>
-        <ul>
-          <li>本人: yamada / yamada</li>
-          <li>管理者: admin / admin</li>
-        </ul>
-      </div>
+
     </section>
   );
 }
