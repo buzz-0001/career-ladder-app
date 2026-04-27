@@ -310,6 +310,7 @@
   background: #eef2ff;
   color: #1e40af;
   font-weight: 700;
+  margin-top: 8px;
 }
 
 .login-card {
@@ -875,6 +876,16 @@
 
   .modal-buttons {
     justify-content: center;
+  }
+
+  .tabs {
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .tabs button {
+    padding: 5px 9px;
+    font-size: 0.75rem;
   }
 }
 
