@@ -75,6 +75,13 @@ export async function initializeDatabase(): Promise<void> {
       }
     }
 
+    // マイグレーション: users テーブルに部署列を追加
+    try {
+      await conn.execute(`ALTER TABLE users ADD COLUMN department VARCHAR(200)`);
+    } catch (err: any) {
+      if (err.code !== 'ER_DUP_FIELDNAME') throw err;
+    }
+
     const [userCount] = await conn.execute('SELECT COUNT(*) as count FROM users') as any;
     if (userCount[0].count === 0) {
       const seedUsers = [

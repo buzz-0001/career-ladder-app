@@ -13,11 +13,15 @@ interface AdminUserManagementProps {
 
 const MASTER_KEY = '2019_0703_masteradmin_MIERU';
 
+// ─── 社員管理セクションの表示フラグ ───────────────────────────────────────
+// true に戻すことで社員管理セクションを再表示できます
+const SHOW_EMP_MANAGEMENT = false;
+
 type PwModalTarget =
   | { type: 'new' }
   | { type: 'edit'; user: AdminUser };
 
-const emptyUserForm = { username: '', displayName: '', password: '', role: 'self' };
+const emptyUserForm = { username: '', displayName: '', password: '', role: 'self', department: '' };
 const emptyEmpForm = { id: '', name: '' };
 
 function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserManagementProps) {
@@ -27,7 +31,7 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
   const [showAddUser, setShowAddUser] = useState(false);
   const [userForm, setUserForm] = useState(emptyUserForm);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
-  const [editUserForm, setEditUserForm] = useState({ username: '', displayName: '', role: 'self' });
+  const [editUserForm, setEditUserForm] = useState({ displayName: '', role: 'self', department: '' });
 
   const [showAddEmp, setShowAddEmp] = useState(false);
   const [empForm, setEmpForm] = useState(emptyEmpForm);
@@ -89,7 +93,7 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
         await apiUpdateUser(pwModal.user.id, {
           displayName: pwModal.user.displayName,
           role: pwModal.user.role,
-          employeeId: pwModal.user.employeeId ?? undefined,
+          department: pwModal.user.department,
           password: newPassword,
         });
         closePwModal();
@@ -110,7 +114,13 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
     }
     clearError();
     try {
-      const created = await apiCreateUser(userForm);
+      const created = await apiCreateUser({
+        username: userForm.username,
+        displayName: userForm.displayName,
+        password: userForm.password,
+        role: userForm.role,
+        department: userForm.department || undefined,
+      });
       setUsers((prev) => [...prev, created]);
       setUserForm(emptyUserForm);
       setShowAddUser(false);
@@ -119,7 +129,7 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
 
   const startEditUser = (u: AdminUser) => {
     setEditingUser(u);
-    setEditUserForm({ username: u.username, displayName: u.displayName, role: u.role });
+    setEditUserForm({ displayName: u.displayName, role: u.role, department: u.department ?? '' });
     clearError();
   };
 
@@ -130,10 +140,10 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
       await apiUpdateUser(editingUser.id, {
         displayName: editUserForm.displayName,
         role: editUserForm.role,
-        employeeId: editingUser.employeeId ?? undefined,
+        department: editUserForm.department || undefined,
       });
       setUsers((prev) => prev.map((u) => u.id === editingUser.id
-        ? { ...u, displayName: editUserForm.displayName, role: editUserForm.role as AdminUser['role'] }
+        ? { ...u, displayName: editUserForm.displayName, role: editUserForm.role as AdminUser['role'], department: editUserForm.department }
         : u
       ));
       setEditingUser(null);
@@ -149,7 +159,7 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
     } catch (err) { handleError(err); }
   };
 
-  // ─── 社員操作 ────────────────────────────────────────────────────────────
+  // ─── 社員操作（社員管理セクション用・非表示中も保持） ─────────────────
 
   const handleCreateEmployee = async () => {
     clearError();
@@ -212,6 +222,10 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
                 </select>
               </div>
               <div className="field">
+                <label>部署</label>
+                <input value={userForm.department} onChange={(e) => setUserForm({ ...userForm, department: e.target.value })} placeholder="例: 訪問看護部" />
+              </div>
+              <div className="field">
                 <label>パスワード</label>
                 {userForm.password ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -232,7 +246,7 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
         <div className="admin-table-wrapper">
           <table className="admin-table">
             <thead>
-              <tr><th>ユーザー名</th><th>表示名</th><th>役割</th><th>操作</th></tr>
+              <tr><th>ユーザー名</th><th>表示名</th><th>役割</th><th>社員ID</th><th>部署</th><th>操作</th></tr>
             </thead>
             <tbody>
               {users.map((u) => (
@@ -246,6 +260,8 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
                         <option value="admin">管理者</option>
                       </select>
                     </td>
+                    <td className="small-text">{u.employeeId ?? '-'}</td>
+                    <td><input className="table-input" value={editUserForm.department} onChange={(e) => setEditUserForm({ ...editUserForm, department: e.target.value })} placeholder="部署名" /></td>
                     <td>
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         <button type="button" className="primary-button" onClick={handleUpdateUser}>保存</button>
@@ -259,6 +275,8 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
                     <td>{u.username}</td>
                     <td>{u.displayName}</td>
                     <td>{u.role === 'admin' ? '管理者' : '本人'}</td>
+                    <td className="small-text">{u.employeeId ?? '-'}</td>
+                    <td>{u.department || '-'}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         <button type="button" className="secondary-button" onClick={() => startEditUser(u)}>編集</button>
@@ -274,66 +292,68 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
         </div>
       </section>
 
-      {/* ─── 社員管理 ─── */}
-      <section className="card" style={{ marginTop: 20 }}>
-        <div className="label-row">
-          <div className="badge">社員管理</div>
-          <button type="button" className="primary-button" onClick={() => { setShowAddEmp((v) => !v); clearError(); }}>
-            {showAddEmp ? 'キャンセル' : '＋ 追加'}
-          </button>
-        </div>
-
-        {showAddEmp && (
-          <div className="admin-form">
-            <div className="input-row">
-              <div className="field">
-                <label>社員ID（例: emp-04）</label>
-                <input value={empForm.id} onChange={(e) => setEmpForm({ ...empForm, id: e.target.value })} />
-              </div>
-              <div className="field">
-                <label>氏名</label>
-                <input value={empForm.name} onChange={(e) => setEmpForm({ ...empForm, name: e.target.value })} />
-              </div>
-            </div>
-            <button type="button" className="primary-button" onClick={handleCreateEmployee}>保存</button>
+      {/* ─── 社員管理（SHOW_EMP_MANAGEMENT = true で再表示可能） ─── */}
+      {SHOW_EMP_MANAGEMENT && (
+        <section className="card" style={{ marginTop: 20 }}>
+          <div className="label-row">
+            <div className="badge">社員管理</div>
+            <button type="button" className="primary-button" onClick={() => { setShowAddEmp((v) => !v); clearError(); }}>
+              {showAddEmp ? 'キャンセル' : '＋ 追加'}
+            </button>
           </div>
-        )}
 
-        <div className="admin-table-wrapper">
-          <table className="admin-table">
-            <thead>
-              <tr><th>社員ID</th><th>氏名</th><th>操作</th></tr>
-            </thead>
-            <tbody>
-              {employees.map((emp) => (
-                editingEmp?.id === emp.id ? (
-                  <tr key={emp.id} className="row-editing">
-                    <td className="small-text">{emp.id}</td>
-                    <td><input className="table-input" value={editEmpName} onChange={(e) => setEditEmpName(e.target.value)} /></td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <button type="button" className="primary-button" onClick={handleUpdateEmployee}>保存</button>
-                        <button type="button" className="secondary-button" onClick={() => setEditingEmp(null)}>戻る</button>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  <tr key={emp.id}>
-                    <td className="small-text">{emp.id}</td>
-                    <td>{emp.name}</td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <button type="button" className="secondary-button" onClick={() => { setEditingEmp(emp); setEditEmpName(emp.name); clearError(); }}>編集</button>
-                        <button type="button" className="secondary-button" onClick={() => handleDeleteEmployee(emp.id)}>削除</button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+          {showAddEmp && (
+            <div className="admin-form">
+              <div className="input-row">
+                <div className="field">
+                  <label>社員ID（例: emp-04）</label>
+                  <input value={empForm.id} onChange={(e) => setEmpForm({ ...empForm, id: e.target.value })} />
+                </div>
+                <div className="field">
+                  <label>氏名</label>
+                  <input value={empForm.name} onChange={(e) => setEmpForm({ ...empForm, name: e.target.value })} />
+                </div>
+              </div>
+              <button type="button" className="primary-button" onClick={handleCreateEmployee}>保存</button>
+            </div>
+          )}
+
+          <div className="admin-table-wrapper">
+            <table className="admin-table">
+              <thead>
+                <tr><th>社員ID</th><th>氏名</th><th>操作</th></tr>
+              </thead>
+              <tbody>
+                {employees.map((emp) => (
+                  editingEmp?.id === emp.id ? (
+                    <tr key={emp.id} className="row-editing">
+                      <td className="small-text">{emp.id}</td>
+                      <td><input className="table-input" value={editEmpName} onChange={(e) => setEditEmpName(e.target.value)} /></td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button type="button" className="primary-button" onClick={handleUpdateEmployee}>保存</button>
+                          <button type="button" className="secondary-button" onClick={() => setEditingEmp(null)}>戻る</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr key={emp.id}>
+                      <td className="small-text">{emp.id}</td>
+                      <td>{emp.name}</td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button type="button" className="secondary-button" onClick={() => { setEditingEmp(emp); setEditEmpName(emp.name); clearError(); }}>編集</button>
+                          <button type="button" className="secondary-button" onClick={() => handleDeleteEmployee(emp.id)}>削除</button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {/* ─── パスワードモーダル ─── */}
       {pwModal && (
@@ -365,7 +385,9 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
               ) : (
                 <>
                   {pwModal.type === 'edit' && (
-                    <p className="small-text" style={{ marginBottom: 12 }}>対象ユーザー：<strong>{pwModal.user.username}</strong>（{pwModal.user.displayName}）</p>
+                    <p className="small-text" style={{ marginBottom: 12 }}>
+                      対象ユーザー：<strong>{pwModal.user.username}</strong>（{pwModal.user.displayName}）
+                    </p>
                   )}
                   <label style={{ fontWeight: 700, fontSize: '0.9rem', display: 'block', marginBottom: 6 }}>
                     新しいパスワード

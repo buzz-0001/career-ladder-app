@@ -239,8 +239,15 @@ app.put('/api/evaluations/:id/lock', authenticate, async (req: AuthRequest, res:
 app.get('/api/admin/users', authenticate, async (req: AuthRequest, res: Response) => {
   if (req.user!.role !== 'admin') { res.status(403).json({ error: '管理者のみアクセス可能です' }); return; }
   try {
-    const [rows] = await pool.execute('SELECT id, username, display_name, role, employee_id FROM users ORDER BY id') as any;
-    res.json(rows.map((u: any) => ({ id: u.id, username: u.username, displayName: u.display_name, role: u.role, employeeId: u.employee_id })));
+    const [rows] = await pool.execute('SELECT id, username, display_name, role, employee_id, department FROM users ORDER BY id') as any;
+    res.json(rows.map((u: any) => ({
+      id: u.id,
+      username: u.username,
+      displayName: u.display_name,
+      role: u.role,
+      employeeId: u.employee_id,
+      department: u.department ?? '',
+    })));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'サーバーエラーが発生しました' });
@@ -249,14 +256,29 @@ app.get('/api/admin/users', authenticate, async (req: AuthRequest, res: Response
 
 app.post('/api/admin/users', authenticate, async (req: AuthRequest, res: Response) => {
   if (req.user!.role !== 'admin') { res.status(403).json({ error: '管理者のみアクセス可能です' }); return; }
-  const { username, displayName, password, role, employeeId } = req.body as { username: string; displayName: string; password: string; role: string; employeeId?: string };
+  const { username, displayName, password, role, department } = req.body as {
+    username: string; displayName: string; password: string; role: string; department?: string;
+  };
   if (!username || !displayName || !password || !role) { res.status(400).json({ error: '必須項目が不足しています' }); return; }
+  const conn = await pool.getConnection();
   try {
-    const [result] = await pool.execute(
-      'INSERT INTO users (username, display_name, password_hash, role, employee_id) VALUES (?, ?, ?, ?, ?)',
-      [username, displayName, bcrypt.hashSync(password, 10), role, employeeId || null]
+    const [result] = await conn.execute(
+      'INSERT INTO users (username, display_name, password_hash, role, department) VALUES (?, ?, ?, ?, ?)',
+      [username, displayName, bcrypt.hashSync(password, 10), role, department || null]
     ) as any;
-    res.json({ id: result.insertId, username, displayName, role, employeeId: employeeId || null });
+
+    // self ロールのユーザーには社員IDを自動採番し employees テーブルにも同期
+    let employeeId: string | null = null;
+    if (role === 'self') {
+      employeeId = `emp-${result.insertId}`;
+      await conn.execute('UPDATE users SET employee_id = ? WHERE id = ?', [employeeId, result.insertId]);
+      await conn.execute(
+        'INSERT INTO employees (id, name) VALUES (?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name)',
+        [employeeId, displayName]
+      );
+    }
+
+    res.json({ id: result.insertId, username, displayName, role, employeeId, department: department || null });
   } catch (err: any) {
     if (err.code === 'ER_DUP_ENTRY') {
       res.status(409).json({ error: 'そのユーザー名は既に使用されています' });
@@ -264,28 +286,54 @@ app.post('/api/admin/users', authenticate, async (req: AuthRequest, res: Respons
       console.error(err);
       res.status(500).json({ error: 'ユーザーの作成に失敗しました' });
     }
+  } finally {
+    conn.release();
   }
 });
 
 app.put('/api/admin/users/:id', authenticate, async (req: AuthRequest, res: Response) => {
   if (req.user!.role !== 'admin') { res.status(403).json({ error: '管理者のみアクセス可能です' }); return; }
-  const { displayName, role, employeeId, password } = req.body as { displayName: string; role: string; employeeId?: string; password?: string };
+  const { displayName, role, department, password } = req.body as {
+    displayName: string; role: string; department?: string; password?: string;
+  };
+  const conn = await pool.getConnection();
   try {
+    const [rows] = await conn.execute('SELECT employee_id FROM users WHERE id = ?', [req.params.id]) as any;
+    const currentEmpId: string | null = rows[0]?.employee_id ?? null;
+
     if (password) {
-      await pool.execute(
-        'UPDATE users SET display_name = ?, role = ?, employee_id = ?, password_hash = ? WHERE id = ?',
-        [displayName, role, employeeId || null, bcrypt.hashSync(password, 10), req.params.id]
+      await conn.execute(
+        'UPDATE users SET display_name = ?, role = ?, department = ?, password_hash = ? WHERE id = ?',
+        [displayName, role, department || null, bcrypt.hashSync(password, 10), req.params.id]
       );
     } else {
-      await pool.execute(
-        'UPDATE users SET display_name = ?, role = ?, employee_id = ? WHERE id = ?',
-        [displayName, role, employeeId || null, req.params.id]
+      await conn.execute(
+        'UPDATE users SET display_name = ?, role = ?, department = ? WHERE id = ?',
+        [displayName, role, department || null, req.params.id]
       );
     }
+
+    if (role === 'self') {
+      if (currentEmpId) {
+        // 表示名が変わった場合に employees テーブルも更新
+        await conn.execute('UPDATE employees SET name = ? WHERE id = ?', [displayName, currentEmpId]);
+      } else {
+        // admin → self へのロール変更時に社員IDを新規採番
+        const empId = `emp-${req.params.id}`;
+        await conn.execute('UPDATE users SET employee_id = ? WHERE id = ?', [empId, req.params.id]);
+        await conn.execute(
+          'INSERT INTO employees (id, name) VALUES (?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name)',
+          [empId, displayName]
+        );
+      }
+    }
+
     res.json({ success: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'サーバーエラーが発生しました' });
+  } finally {
+    conn.release();
   }
 });
 

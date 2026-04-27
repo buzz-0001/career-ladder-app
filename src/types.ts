@@ -11,6 +11,7 @@ export interface AdminUser {
   displayName: string;
   role: UserRole;
   employeeId: string | null;
+  department?: string;
 }
 export type EvaluationRole = 'self' | 'admin';
 export type Score = 0 | 1 | 2 | 'excluded';

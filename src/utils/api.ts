@@ -77,7 +77,7 @@ export async function apiGetUsers(): Promise<AdminUser[]> {
   return handleResponse(res);
 }
 
-export async function apiCreateUser(data: { username: string; displayName: string; password: string; role: string; employeeId?: string }): Promise<AdminUser> {
+export async function apiCreateUser(data: { username: string; displayName: string; password: string; role: string; department?: string }): Promise<AdminUser> {
   const res = await fetch(`${API_BASE}/admin/users`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -86,7 +86,7 @@ export async function apiCreateUser(data: { username: string; displayName: strin
   return handleResponse(res);
 }
 
-export async function apiUpdateUser(id: number, data: { displayName: string; role: string; employeeId?: string; password?: string }): Promise<void> {
+export async function apiUpdateUser(id: number, data: { displayName: string; role: string; department?: string; password?: string }): Promise<void> {
   const res = await fetch(`${API_BASE}/admin/users/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
