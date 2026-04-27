@@ -165,9 +165,10 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
     };
   }, [months, sortedRecords, lineMetricId, lineMetricOptions, categories]);
 
-  const latestSelfRecord = useMemo(
+  // 挑戦テキストがある最新の本人評価レコードを探す（月をまたいで）
+  const selfChallengeRecord = useMemo(
     () => evaluations
-      .filter((r) => r.employeeId === employeeId && r.role === 'self')
+      .filter((r) => r.employeeId === employeeId && r.role === 'self' && !!r.challenge)
       .sort((a, b) => b.month.localeCompare(a.month))[0] ?? null,
     [evaluations, employeeId]
   );
@@ -179,12 +180,7 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
     [evaluations, employeeId]
   );
 
-  const hasCommentData = !!(
-    latestSelfRecord?.challenge ||
-    latestAdminRecord?.adminChallenge ||
-    latestAdminRecord?.teamOpinion ||
-    latestAdminRecord?.feedback
-  );
+  const hasCommentData = !!(selfChallengeRecord || latestAdminRecord);
 
   const selectedCategory = categories.find((c) => c.id === selectedCategoryId) ?? null;
 
@@ -356,12 +352,18 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
 
       {hasCommentData && (
         <section className="category-card">
+          {latestAdminRecord && (
+            <div className="comment-interview-month">
+              <span className="comment-interview-month-label">面談月</span>
+              <span>{formatMonthLabel(latestAdminRecord.month)}</span>
+            </div>
+          )}
           <div className="comment-section-header">今後挑戦したいこと / 挑戦してほしいこと</div>
           <div className="comment-two-col">
             <div className="comment-cell">
               <div className="comment-cell-label">本人</div>
               <div className="comment-cell-text">
-                {latestSelfRecord?.challenge || <span className="comment-cell-empty">まだ記入されていません</span>}
+                {selfChallengeRecord?.challenge || <span className="comment-cell-empty">まだ記入されていません</span>}
               </div>
             </div>
             <div className="comment-cell">
