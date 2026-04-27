@@ -223,7 +223,7 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
               </div>
               <div className="field">
                 <label>部署</label>
-                <input value={userForm.department} onChange={(e) => setUserForm({ ...userForm, department: e.target.value })} placeholder="例: 訪問看護部" />
+                <input value={userForm.department} onChange={(e) => setUserForm({ ...userForm, department: e.target.value })} placeholder="例：健康予防事業部" />
               </div>
               <div className="field">
                 <label>パスワード</label>
