@@ -11,6 +11,12 @@ interface AdminUserManagementProps {
   user: User;
 }
 
+const MASTER_KEY = '2019_0703_masteradmin_MIERU';
+
+type PwModalTarget =
+  | { type: 'new' }
+  | { type: 'edit'; user: AdminUser };
+
 const emptyUserForm = { username: '', displayName: '', password: '', role: 'self' };
 const emptyEmpForm = { id: '', name: '' };
 
@@ -21,12 +27,20 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
   const [showAddUser, setShowAddUser] = useState(false);
   const [userForm, setUserForm] = useState(emptyUserForm);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
-  const [editUserForm, setEditUserForm] = useState(emptyUserForm);
+  const [editUserForm, setEditUserForm] = useState({ username: '', displayName: '', role: 'self' });
 
   const [showAddEmp, setShowAddEmp] = useState(false);
   const [empForm, setEmpForm] = useState(emptyEmpForm);
   const [editingEmp, setEditingEmp] = useState<Employee | null>(null);
   const [editEmpName, setEditEmpName] = useState('');
+
+  // パスワードモーダル
+  const [pwModal, setPwModal] = useState<PwModalTarget | null>(null);
+  const [keyInput, setKeyInput] = useState('');
+  const [keyVerified, setKeyVerified] = useState(false);
+  const [keyError, setKeyError] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [pwSaving, setPwSaving] = useState(false);
 
   useEffect(() => {
     apiGetUsers().then(setUsers).catch(console.error);
@@ -37,9 +51,63 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
   const handleError = (err: unknown) => setError(err instanceof Error ? err.message : '操作に失敗しました');
   const clearError = () => setError('');
 
+  // ─── パスワードモーダル操作 ────────────────────────────────────────────
+
+  const openPwModal = (target: PwModalTarget) => {
+    setPwModal(target);
+    setKeyInput('');
+    setKeyVerified(false);
+    setKeyError('');
+    setNewPassword('');
+  };
+
+  const closePwModal = () => {
+    setPwModal(null);
+    setKeyInput('');
+    setKeyVerified(false);
+    setKeyError('');
+    setNewPassword('');
+  };
+
+  const handleKeyVerify = () => {
+    if (keyInput === MASTER_KEY) {
+      setKeyVerified(true);
+      setKeyError('');
+    } else {
+      setKeyError('キーが正しくありません');
+    }
+  };
+
+  const handlePasswordSave = async () => {
+    if (!pwModal || !newPassword) return;
+    setPwSaving(true);
+    try {
+      if (pwModal.type === 'new') {
+        setUserForm((prev) => ({ ...prev, password: newPassword }));
+        closePwModal();
+      } else {
+        await apiUpdateUser(pwModal.user.id, {
+          displayName: pwModal.user.displayName,
+          role: pwModal.user.role,
+          employeeId: pwModal.user.employeeId ?? undefined,
+          password: newPassword,
+        });
+        closePwModal();
+      }
+    } catch (err) {
+      handleError(err);
+    } finally {
+      setPwSaving(false);
+    }
+  };
+
   // ─── ユーザー操作 ────────────────────────────────────────────────────────
 
   const handleCreateUser = async () => {
+    if (!userForm.password) {
+      setError('パスワードを設定してください');
+      return;
+    }
     clearError();
     try {
       const created = await apiCreateUser(userForm);
@@ -51,7 +119,7 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
 
   const startEditUser = (u: AdminUser) => {
     setEditingUser(u);
-    setEditUserForm({ username: u.username, displayName: u.displayName, password: '', role: u.role });
+    setEditUserForm({ username: u.username, displayName: u.displayName, role: u.role });
     clearError();
   };
 
@@ -62,7 +130,7 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
       await apiUpdateUser(editingUser.id, {
         displayName: editUserForm.displayName,
         role: editUserForm.role,
-        password: editUserForm.password || undefined,
+        employeeId: editingUser.employeeId ?? undefined,
       });
       setUsers((prev) => prev.map((u) => u.id === editingUser.id
         ? { ...u, displayName: editUserForm.displayName, role: editUserForm.role as AdminUser['role'] }
@@ -137,15 +205,24 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
                 <input value={userForm.displayName} onChange={(e) => setUserForm({ ...userForm, displayName: e.target.value })} />
               </div>
               <div className="field">
-                <label>パスワード</label>
-                <input type="password" value={userForm.password} onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} />
-              </div>
-              <div className="field">
                 <label>役割</label>
                 <select value={userForm.role} onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}>
                   <option value="self">本人</option>
                   <option value="admin">管理者</option>
                 </select>
+              </div>
+              <div className="field">
+                <label>パスワード</label>
+                {userForm.password ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: '#22c55e', fontWeight: 600, fontSize: '0.88rem' }}>✓ 設定済み</span>
+                    <button type="button" className="secondary-button" style={{ fontSize: '0.78rem', padding: '3px 8px' }} onClick={() => openPwModal({ type: 'new' })}>変更</button>
+                  </div>
+                ) : (
+                  <button type="button" className="secondary-button" onClick={() => openPwModal({ type: 'new' })}>
+                    パスワードを発行する
+                  </button>
+                )}
               </div>
             </div>
             <button type="button" className="primary-button" onClick={handleCreateUser}>保存</button>
@@ -170,9 +247,9 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
                       </select>
                     </td>
                     <td>
-                      <input className="table-input" type="password" placeholder="PW変更する場合のみ入力" value={editUserForm.password} onChange={(e) => setEditUserForm({ ...editUserForm, password: e.target.value })} style={{ marginBottom: 4 }} />
-                      <div style={{ display: 'flex', gap: 4 }}>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         <button type="button" className="primary-button" onClick={handleUpdateUser}>保存</button>
+                        <button type="button" className="secondary-button" onClick={() => openPwModal({ type: 'edit', user: u })}>PW変更</button>
                         <button type="button" className="secondary-button" onClick={() => setEditingUser(null)}>戻る</button>
                       </div>
                     </td>
@@ -183,8 +260,9 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
                     <td>{u.displayName}</td>
                     <td>{u.role === 'admin' ? '管理者' : '本人'}</td>
                     <td>
-                      <div style={{ display: 'flex', gap: 4 }}>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         <button type="button" className="secondary-button" onClick={() => startEditUser(u)}>編集</button>
+                        <button type="button" className="secondary-button" onClick={() => openPwModal({ type: 'edit', user: u })}>PW変更</button>
                         <button type="button" className="secondary-button" onClick={() => handleDeleteUser(u.id)}>削除</button>
                       </div>
                     </td>
@@ -256,6 +334,66 @@ function AdminUserManagement({ employees, onEmployeesChange, user }: AdminUserMa
           </table>
         </div>
       </section>
+
+      {/* ─── パスワードモーダル ─── */}
+      {pwModal && (
+        <div className="modal-overlay" onClick={closePwModal}>
+          <div className="modal-content" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>{keyVerified ? 'パスワードを設定' : 'key?'}</h3>
+              <button type="button" className="close-button" onClick={closePwModal}>×</button>
+            </div>
+            <div style={{ padding: '8px 0 16px' }}>
+              {!keyVerified ? (
+                <>
+                  <p className="small-text" style={{ marginBottom: 12 }}>マスターキーを入力してください</p>
+                  <input
+                    className="table-input"
+                    type="password"
+                    value={keyInput}
+                    onChange={(e) => setKeyInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleKeyVerify()}
+                    placeholder="マスターキーを入力"
+                    style={{ width: '100%', marginBottom: 8 }}
+                    autoFocus
+                  />
+                  {keyError && (
+                    <p style={{ color: '#ef4444', fontSize: '0.85rem', marginBottom: 8 }}>{keyError}</p>
+                  )}
+                  <button type="button" className="primary-button" onClick={handleKeyVerify}>確認</button>
+                </>
+              ) : (
+                <>
+                  {pwModal.type === 'edit' && (
+                    <p className="small-text" style={{ marginBottom: 12 }}>対象ユーザー：<strong>{pwModal.user.username}</strong>（{pwModal.user.displayName}）</p>
+                  )}
+                  <label style={{ fontWeight: 700, fontSize: '0.9rem', display: 'block', marginBottom: 6 }}>
+                    新しいパスワード
+                  </label>
+                  <input
+                    className="table-input"
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && !pwSaving && handlePasswordSave()}
+                    placeholder="新しいパスワードを入力"
+                    style={{ width: '100%', marginBottom: 12 }}
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={handlePasswordSave}
+                    disabled={!newPassword || pwSaving}
+                  >
+                    {pwSaving ? '保存中...' : pwModal.type === 'new' ? '設定する' : '変更する'}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
