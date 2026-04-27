@@ -33,6 +33,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
   const [goal, setGoal] = useState('');
   const [savedAt, setSavedAt] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
+  const [showPromotion, setShowPromotion] = useState(false);
   const [challenge, setChallenge] = useState('');
   const [adminChallenge, setAdminChallenge] = useState('');
   const [teamOpinion, setTeamOpinion] = useState('');
@@ -233,6 +234,9 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
       <div className="label-row">
         <div className="badge">評価入力画面</div>
         <div className="small-text">選択した評価対象者、時期、レベル、評価者別に保存されます。</div>
+        <button type="button" className="promotion-criteria-btn" onClick={() => setShowPromotion(true)}>
+          昇格基準
+        </button>
       </div>
 
       <div className="input-row">
@@ -528,6 +532,70 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
                 <button type="button" className="primary-button" onClick={() => saveAndNavigate('next')}>
                   保存して次に進む
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── 昇格基準モーダル ─── */}
+      {showPromotion && (
+        <div className="modal-overlay" onClick={() => setShowPromotion(false)}>
+          <div className="modal-content promotion-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>昇格基準</h3>
+              <button type="button" className="close-button" onClick={() => setShowPromotion(false)}>×</button>
+            </div>
+            <div className="modal-items">
+              <div className="promotion-card">
+                <div className="promotion-card-title">
+                  <span className="promotion-level-badge">初級者</span>
+                  <span className="promotion-arrow">→</span>
+                  <span>業務遂行へ昇格</span>
+                </div>
+                <ul className="promotion-conditions">
+                  <li>全体の点数が <strong>65%以上（113点以上）</strong></li>
+                </ul>
+              </div>
+
+              <div className="promotion-card">
+                <div className="promotion-card-title">
+                  <span className="promotion-level-badge">業務遂行</span>
+                  <span className="promotion-arrow">→</span>
+                  <span>リーダーへ昇格</span>
+                </div>
+                <ul className="promotion-conditions">
+                  <li>全体の点数が <strong>80%以上（149点以上）</strong></li>
+                  <li>サービス対応が <strong>88/98点（90%）以上</strong></li>
+                  <li>健康管理が <strong>9/10点（90%）以上</strong></li>
+                </ul>
+              </div>
+
+              <div className="promotion-card">
+                <div className="promotion-card-title">
+                  <span className="promotion-level-badge">リーダー</span>
+                  <span className="promotion-arrow">→</span>
+                  <span>管理者へ昇格</span>
+                </div>
+                <ul className="promotion-conditions">
+                  <li>全体の点数が <strong>85%以上（165点以上）</strong></li>
+                  <li>組織管理が <strong>56/62点（90%）以上</strong></li>
+                  <li>健康管理が <strong>9/10点（90%）以上</strong></li>
+                </ul>
+              </div>
+
+              <div className="promotion-card">
+                <div className="promotion-card-title">
+                  <span className="promotion-level-badge promotion-level-badge--top">管理者</span>
+                  <span className="promotion-arrow">→</span>
+                  <span>管理者レベルの達成基準</span>
+                </div>
+                <ul className="promotion-conditions">
+                  <li>全体の点数が <strong>90%以上（171点以上）</strong></li>
+                  <li>サービス対応が <strong>81点以上（90%）</strong></li>
+                  <li>組織管理が <strong>54点以上（90%）</strong></li>
+                  <li>健康管理が <strong>15点以上（90%）</strong></li>
+                </ul>
               </div>
             </div>
           </div>
