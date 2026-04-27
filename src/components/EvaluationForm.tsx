@@ -33,8 +33,13 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
   const [goal, setGoal] = useState('');
   const [savedAt, setSavedAt] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
+  const [challenge, setChallenge] = useState('');
+  const [adminChallenge, setAdminChallenge] = useState('');
+  const [teamOpinion, setTeamOpinion] = useState('');
+  const [feedbackText, setFeedbackText] = useState('');
   const [currentCategoryIndex, setCurrentCategoryIndex] = useState(0);
   const modalContentRef = useRef<HTMLDivElement>(null);
+  const modalItemsRef = useRef<HTMLDivElement>(null);
 
   const effectiveRole = user.role === 'self' ? 'self' as const : role;
   const currentRecordId = useMemo(
@@ -51,15 +56,23 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
     if (existing) {
       setScores(existing.scores);
       setGoal(existing.goal ?? '');
+      setChallenge(existing.challenge ?? '');
+      setAdminChallenge(existing.adminChallenge ?? '');
+      setTeamOpinion(existing.teamOpinion ?? '');
+      setFeedbackText(existing.feedback ?? '');
     } else {
       setScores({});
       setGoal('');
+      setChallenge('');
+      setAdminChallenge('');
+      setTeamOpinion('');
+      setFeedbackText('');
     }
   }, [currentRecordId, evaluations]);
 
   useEffect(() => {
-    if (modalOpen && modalContentRef.current) {
-      modalContentRef.current.scrollTop = 0;
+    if (modalOpen && modalItemsRef.current) {
+      modalItemsRef.current.scrollTop = 0;
     }
   }, [currentCategoryIndex, modalOpen]);
 
@@ -133,6 +146,13 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
     return items;
   }, [visibleCategories]);
 
+  const crossRecord = useMemo(() => {
+    const crossRole = effectiveRole === 'self' ? 'admin' : 'self';
+    return evaluations.find(
+      (r) => r.employeeId === employeeId && r.month === month && r.level === level && r.role === crossRole
+    ) ?? null;
+  }, [evaluations, employeeId, month, level, effectiveRole]);
+
   const openModal = (categoryIndex: number) => {
     setCurrentCategoryIndex(categoryIndex);
     setModalOpen(true);
@@ -172,6 +192,10 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
       role: effectiveRole,
       locked: isLocked,
       goal,
+      challenge,
+      adminChallenge,
+      teamOpinion,
+      feedback: feedbackText,
       scores: nextScores,
       updatedAt: new Date().toISOString()
     };
@@ -265,9 +289,11 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
       </div>
 
       <div className="stats-row">
-        <div className="stat-card">
-          <strong>対象者</strong>
-          {employeeName}
+        <div className="stat-card stat-card-subject">
+          <div className="stat-card-subject-row">
+            <strong>対象者</strong>
+            <span>{employeeName}</span>
+          </div>
         </div>
         <div className="stat-card">
           <strong>合計点数</strong>
@@ -328,6 +354,89 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
         />
       </div>
 
+      {/* 今後挑戦したいこと：本人が入力、管理者は読み取り専用 */}
+      <div className="goal-input-section">
+        <label className="goal-input-label">今後挑戦したいこと（あれば記入）</label>
+        {user.role === 'self' ? (
+          <textarea
+            className="goal-textarea"
+            value={challenge}
+            onChange={(e) => setChallenge(e.target.value)}
+            onBlur={() => saveRecord(scores)}
+            placeholder="今後挑戦したいことを記入してください"
+            disabled={isLocked}
+            rows={3}
+          />
+        ) : (
+          <div className="readonly-field">
+            {(effectiveRole === 'admin' ? crossRecord?.challenge : challenge) || <span className="readonly-field-empty">まだ記入されていません</span>}
+          </div>
+        )}
+      </div>
+
+      {/* 管理者評価入力時のみ表示：管理者が編集可能なフィールド */}
+      {user.role === 'admin' && effectiveRole === 'admin' && (
+        <>
+          <div className="goal-input-section">
+            <label className="goal-input-label">今後挑戦してほしいこと（あれば記入）</label>
+            <textarea
+              className="goal-textarea"
+              value={adminChallenge}
+              onChange={(e) => setAdminChallenge(e.target.value)}
+              onBlur={() => saveRecord(scores)}
+              placeholder="今後挑戦してほしいことを記入してください"
+              rows={3}
+            />
+          </div>
+          <div className="goal-input-section">
+            <label className="goal-input-label">チーム・会社への意見や相談（あれば記入）</label>
+            <textarea
+              className="goal-textarea"
+              value={teamOpinion}
+              onChange={(e) => setTeamOpinion(e.target.value)}
+              onBlur={() => saveRecord(scores)}
+              placeholder="チーム・会社への意見や相談を記入してください"
+              rows={3}
+            />
+          </div>
+          <div className="goal-input-section">
+            <label className="goal-input-label">フィードバック内容（あれば記入）</label>
+            <textarea
+              className="goal-textarea"
+              value={feedbackText}
+              onChange={(e) => setFeedbackText(e.target.value)}
+              onBlur={() => saveRecord(scores)}
+              placeholder="フィードバック内容を記入してください"
+              rows={3}
+            />
+          </div>
+        </>
+      )}
+
+      {/* 本人向け：管理者評価が存在する場合に管理者コメントを読み取り専用で表示 */}
+      {user.role === 'self' && crossRecord && (
+        <>
+          <div className="goal-input-section">
+            <label className="goal-input-label">今後挑戦してほしいこと（管理者より）</label>
+            <div className="readonly-field">
+              {crossRecord.adminChallenge || <span className="readonly-field-empty">まだ記入されていません</span>}
+            </div>
+          </div>
+          <div className="goal-input-section">
+            <label className="goal-input-label">チーム・会社への意見や相談（管理者より）</label>
+            <div className="readonly-field">
+              {crossRecord.teamOpinion || <span className="readonly-field-empty">まだ記入されていません</span>}
+            </div>
+          </div>
+          <div className="goal-input-section">
+            <label className="goal-input-label">フィードバック内容（管理者より）</label>
+            <div className="readonly-field">
+              {crossRecord.feedback || <span className="readonly-field-empty">まだ記入されていません</span>}
+            </div>
+          </div>
+        </>
+      )}
+
       <div className="data-grid">
         {visibleCategories.map((category, index) => {
           const categoryScore = getCategoryScore(category);
@@ -363,7 +472,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
               <h3>{visibleCategories[currentCategoryIndex]?.title} の採点</h3>
               <button type="button" className="close-button" onClick={closeModal}>×</button>
             </div>
-            <div className="modal-items">
+            <div className="modal-items" ref={modalItemsRef}>
               {isLocked && (
                 <div className="locked-banner">🔒 この評価は確定済みです。管理者のみ編集できます。</div>
               )}

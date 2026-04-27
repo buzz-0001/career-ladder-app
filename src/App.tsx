@@ -60,7 +60,7 @@ function App() {
     <div className="app-shell">
       <header className="app-header">
         <div>
-          <h1>ラダーミエル</h1>
+          <h1>ラダーMieru</h1>
           <p>{user.role === 'admin' ? '管理者ダッシュボード' : `${user.displayName} さんの自己評価画面`}</p>
           <span className="user-chip">{user.displayName} ({user.role === 'admin' ? '管理者' : '本人'})</span>
         </div>

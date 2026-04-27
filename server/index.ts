@@ -137,6 +137,10 @@ app.get('/api/evaluations', authenticate, async (req: AuthRequest, res: Response
           role: row.role,
           locked: row.locked === 1,
           goal: row.goal ?? '',
+          challenge: row.challenge ?? '',
+          adminChallenge: row.admin_challenge ?? '',
+          teamOpinion: row.team_opinion ?? '',
+          feedback: row.feedback ?? '',
           scores,
           updatedAt: row.updated_at,
         };
@@ -173,16 +177,20 @@ app.post('/api/evaluations', authenticate, async (req: AuthRequest, res: Respons
     await conn.beginTransaction();
 
     await conn.execute(`
-      INSERT INTO evaluations (id, employee_id, employee_name, month, level, role, locked, goal, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+      INSERT INTO evaluations (id, employee_id, employee_name, month, level, role, locked, goal, challenge, admin_challenge, team_opinion, feedback, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
-        employee_name = VALUES(employee_name),
-        month         = VALUES(month),
-        level         = VALUES(level),
-        role          = VALUES(role),
-        goal          = VALUES(goal),
-        updated_at    = VALUES(updated_at)
-    `, [record.id, record.employeeId, record.employeeName, record.month, record.level, record.role, record.goal ?? null, record.updatedAt]);
+        employee_name   = VALUES(employee_name),
+        month           = VALUES(month),
+        level           = VALUES(level),
+        role            = VALUES(role),
+        goal            = VALUES(goal),
+        challenge       = VALUES(challenge),
+        admin_challenge = VALUES(admin_challenge),
+        team_opinion    = VALUES(team_opinion),
+        feedback        = VALUES(feedback),
+        updated_at      = VALUES(updated_at)
+    `, [record.id, record.employeeId, record.employeeName, record.month, record.level, record.role, record.goal ?? null, record.challenge ?? null, record.adminChallenge ?? null, record.teamOpinion ?? null, record.feedback ?? null, record.updatedAt]);
 
     await conn.execute('DELETE FROM evaluation_scores WHERE evaluation_id = ?', [record.id]);
 

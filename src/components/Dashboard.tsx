@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Chart as ChartJS,
   RadialLinearScale,
@@ -54,6 +54,7 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
   const [role, setRole] = useState<EvaluationRole>('self');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [lineMetricId, setLineMetricId] = useState('total');
+  const savedScrollY = useRef<number | null>(null);
 
   useEffect(() => {
     apiLoadEvaluations().then(setEvaluations).catch(console.error);
@@ -63,6 +64,19 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
   useEffect(() => {
     setSelectedCategoryId(null);
   }, [employeeId, role]);
+
+  // 詳細トグル時にスクロール位置を保持する
+  useEffect(() => {
+    if (savedScrollY.current !== null) {
+      window.scrollTo({ top: savedScrollY.current, behavior: 'instant' });
+      savedScrollY.current = null;
+    }
+  }, [selectedCategoryId]);
+
+  const handleToggleDetail = (catId: string) => {
+    savedScrollY.current = window.scrollY;
+    setSelectedCategoryId(selectedCategoryId === catId ? null : catId);
+  };
 
   const filteredRecords = useMemo(
     () => evaluations.filter((r) => r.employeeId === employeeId && r.role === role),
@@ -151,6 +165,27 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
     };
   }, [months, sortedRecords, lineMetricId, lineMetricOptions, categories]);
 
+  const latestSelfRecord = useMemo(
+    () => evaluations
+      .filter((r) => r.employeeId === employeeId && r.role === 'self')
+      .sort((a, b) => b.month.localeCompare(a.month))[0] ?? null,
+    [evaluations, employeeId]
+  );
+
+  const latestAdminRecord = useMemo(
+    () => evaluations
+      .filter((r) => r.employeeId === employeeId && r.role === 'admin')
+      .sort((a, b) => b.month.localeCompare(a.month))[0] ?? null,
+    [evaluations, employeeId]
+  );
+
+  const hasCommentData = !!(
+    latestSelfRecord?.challenge ||
+    latestAdminRecord?.adminChallenge ||
+    latestAdminRecord?.teamOpinion ||
+    latestAdminRecord?.feedback
+  );
+
   const selectedCategory = categories.find((c) => c.id === selectedCategoryId) ?? null;
 
   // 詳細表示: 直近4回 × flattenしたアイテム
@@ -182,7 +217,7 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
         </div>
         <div className="field">
           <label>評価種別</label>
-          <div className="score-options">
+          <div className="role-options">
             {roles.map((r) => (
               <label key={r.value}>
                 <input type="radio" name="dashboard-role" value={r.value} checked={role === r.value} onChange={() => setRole(r.value)} />
@@ -209,6 +244,7 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
                 <Radar
                   data={radarData}
                   options={{
+                    aspectRatio: 2.0,
                     scales: {
                       r: {
                         suggestedMin: 0,
@@ -234,6 +270,7 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
                   data={lineData}
                   options={{
                     responsive: true,
+                    aspectRatio: 4.0,
                     plugins: { legend: { position: 'bottom' } },
                     scales: {
                       y: {
@@ -249,60 +286,95 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
               </div>
             </section>
 
+            {hasCommentData && (
+              <section className="category-card">
+                <div className="comment-section-header">今後挑戦したいこと / 挑戦してほしいこと</div>
+                <div className="comment-two-col">
+                  <div className="comment-cell">
+                    <div className="comment-cell-label">本人</div>
+                    <div className="comment-cell-text">
+                      {latestSelfRecord?.challenge || <span className="comment-cell-empty">まだ記入されていません</span>}
+                    </div>
+                  </div>
+                  <div className="comment-cell">
+                    <div className="comment-cell-label">管理者</div>
+                    <div className="comment-cell-text">
+                      {latestAdminRecord?.adminChallenge || <span className="comment-cell-empty">まだ記入されていません</span>}
+                    </div>
+                  </div>
+                </div>
+                <div className="comment-section-header">チーム・会社への意見や相談</div>
+                <div className="comment-cell-text">
+                  {latestAdminRecord?.teamOpinion || <span className="comment-cell-empty">まだ記入されていません</span>}
+                </div>
+                <div className="comment-section-header">フィードバック内容</div>
+                <div className="comment-cell-text">
+                  {latestAdminRecord?.feedback || <span className="comment-cell-empty">まだ記入されていません</span>}
+                </div>
+              </section>
+            )}
+
             <section className="category-card">
               <h3>詳細分析</h3>
               <div className="data-grid">
                 {categories.map((cat) => (
-                  <div key={cat.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-                    <span>{cat.title}</span>
-                    <button
-                      type="button"
-                      className={selectedCategoryId === cat.id ? 'primary-button' : ''}
-                      onClick={() => setSelectedCategoryId(selectedCategoryId === cat.id ? null : cat.id)}
-                    >
-                      {selectedCategoryId === cat.id ? '閉じる' : '詳細'}
-                    </button>
+                  <div key={cat.id}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                      <span>{cat.title}</span>
+                      <button
+                        type="button"
+                        className={selectedCategoryId === cat.id ? 'primary-button' : ''}
+                        onClick={() => handleToggleDetail(cat.id)}
+                      >
+                        {selectedCategoryId === cat.id ? '閉じる' : '詳細'}
+                      </button>
+                    </div>
+                    {selectedCategoryId === cat.id && detailItems.length > 0 && (
+                      <div style={{ marginTop: 10 }}>
+                        <div className="admin-table-wrapper">
+                          <table className="admin-table">
+                            <thead>
+                              <tr>
+                                <th>小項目</th>
+                                {detailRecords.map((r) => (
+                                  <th key={r.month}>{formatMonthLabel(r.month)}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {detailItems.map((item) => (
+                                <tr key={item.id}>
+                                  <td style={{ maxWidth: 200, whiteSpace: 'normal', fontSize: '0.8rem' }}>{item.title}</td>
+                                  {detailRecords.map((r) => (
+                                    <td key={r.month} style={{ textAlign: 'center', fontWeight: 600 }}>
+                                      {scoreLabel(r.scores[item.id])}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+                          <button
+                            type="button"
+                            className="detail-collapse-btn"
+                            onClick={() => handleToggleDetail(cat.id)}
+                            title="閉じる"
+                          >
+                            ⌃
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {selectedCategoryId === cat.id && detailItems.length === 0 && (
+                      <p className="small-text" style={{ marginTop: 8 }}>現在のレベルに表示できる項目がありません。</p>
+                    )}
                   </div>
                 ))}
               </div>
             </section>
           </div>
-
-          {selectedCategory && detailItems.length > 0 && (
-            <section className="category-card" style={{ marginTop: 16 }}>
-              <h3>{selectedCategory.title} の小項目スコア推移（直近{detailRecords.length}回）</h3>
-              <div className="admin-table-wrapper">
-                <table className="admin-table">
-                  <thead>
-                    <tr>
-                      <th>小項目</th>
-                      {detailRecords.map((r) => (
-                        <th key={r.month}>{formatMonthLabel(r.month)}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detailItems.map((item) => (
-                      <tr key={item.id}>
-                        <td style={{ maxWidth: 200, whiteSpace: 'normal', fontSize: '0.8rem' }}>{item.title}</td>
-                        {detailRecords.map((r) => (
-                          <td key={r.month} style={{ textAlign: 'center', fontWeight: 600 }}>
-                            {scoreLabel(r.scores[item.id])}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
-
-          {selectedCategory && detailItems.length === 0 && (
-            <section className="category-card" style={{ marginTop: 16 }}>
-              <p className="small-text">現在のレベルに表示できる項目がありません。</p>
-            </section>
-          )}
         </>
       ) : (
         <div className="category-card">

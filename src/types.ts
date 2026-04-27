@@ -58,6 +58,10 @@ export interface EvaluationRecord {
   role: EvaluationRole;
   locked: boolean;
   goal?: string;
+  challenge?: string;
+  adminChallenge?: string;
+  teamOpinion?: string;
+  feedback?: string;
   scores: Record<string, Score>;
   updatedAt: string;
 }

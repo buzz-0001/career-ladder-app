@@ -66,6 +66,15 @@ export async function initializeDatabase(): Promise<void> {
       ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
     `);
 
+    // マイグレーション: テキスト記入欄の追加（列が既に存在する場合はスキップ）
+    for (const col of ['challenge TEXT', 'admin_challenge TEXT', 'team_opinion TEXT', 'feedback TEXT']) {
+      try {
+        await conn.execute(`ALTER TABLE evaluations ADD COLUMN ${col}`);
+      } catch (err: any) {
+        if (err.code !== 'ER_DUP_FIELDNAME') throw err;
+      }
+    }
+
     const [userCount] = await conn.execute('SELECT COUNT(*) as count FROM users') as any;
     if (userCount[0].count === 0) {
       const seedUsers = [
