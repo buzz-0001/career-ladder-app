@@ -98,7 +98,9 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 
 app.get('/api/employees', authenticate, async (_req: AuthRequest, res: Response) => {
   try {
-    const [rows] = await pool.execute('SELECT id, name FROM employees ORDER BY id') as any;
+    const [rows] = await pool.execute(
+      'SELECT e.id, e.name FROM employees e INNER JOIN users u ON u.employee_id = e.id ORDER BY e.id'
+    ) as any;
     res.json(rows);
   } catch (err) {
     console.error(err);
@@ -341,7 +343,12 @@ app.delete('/api/admin/users/:id', authenticate, async (req: AuthRequest, res: R
   if (req.user!.role !== 'admin') { res.status(403).json({ error: '管理者のみアクセス可能です' }); return; }
   if (String(req.params.id) === String(req.user!.id)) { res.status(400).json({ error: '自分自身は削除できません' }); return; }
   try {
+    const [rows] = await pool.execute('SELECT employee_id FROM users WHERE id = ?', [req.params.id]) as any;
+    const employeeId = rows[0]?.employee_id ?? null;
     await pool.execute('DELETE FROM users WHERE id = ?', [req.params.id]);
+    if (employeeId) {
+      await pool.execute('DELETE FROM employees WHERE id = ?', [employeeId]);
+    }
     res.json({ success: true });
   } catch (err) {
     console.error(err);
