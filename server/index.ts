@@ -21,6 +21,10 @@ const openai = apiKey ? new OpenAI({ apiKey }) : null;
 
 app.use(cors());
 app.use(express.json());
+app.use((_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
+  next();
+});
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
