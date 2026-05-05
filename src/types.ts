@@ -60,6 +60,7 @@ export interface EvaluationRecord {
   locked: boolean;
   goal?: string;
   challenge?: string;
+  reviewPeriod?: string;
   adminChallenge?: string;
   teamOpinion?: string;
   feedback?: string;

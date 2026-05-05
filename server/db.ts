@@ -67,7 +67,7 @@ export async function initializeDatabase(): Promise<void> {
     `);
 
     // マイグレーション: テキスト記入欄の追加（列が既に存在する場合はスキップ）
-    for (const col of ['challenge TEXT', 'admin_challenge TEXT', 'team_opinion TEXT', 'feedback TEXT']) {
+    for (const col of ['challenge TEXT', 'admin_challenge TEXT', 'team_opinion TEXT', 'feedback TEXT', 'review_period TEXT']) {
       try {
         await conn.execute(`ALTER TABLE evaluations ADD COLUMN ${col}`);
       } catch (err: any) {

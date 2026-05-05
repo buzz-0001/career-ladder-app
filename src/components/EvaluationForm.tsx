@@ -35,6 +35,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
   const [modalOpen, setModalOpen] = useState(false);
   const [showPromotion, setShowPromotion] = useState(false);
   const [challenge, setChallenge] = useState('');
+  const [reviewPeriod, setReviewPeriod] = useState('');
   const [adminChallenge, setAdminChallenge] = useState('');
   const [teamOpinion, setTeamOpinion] = useState('');
   const [feedbackText, setFeedbackText] = useState('');
@@ -58,6 +59,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
       setScores(existing.scores);
       setGoal(existing.goal ?? '');
       setChallenge(existing.challenge ?? '');
+      setReviewPeriod(existing.reviewPeriod ?? '');
       setAdminChallenge(existing.adminChallenge ?? '');
       setTeamOpinion(existing.teamOpinion ?? '');
       setFeedbackText(existing.feedback ?? '');
@@ -65,6 +67,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
       setScores({});
       setGoal('');
       setChallenge('');
+      setReviewPeriod('');
       setAdminChallenge('');
       setTeamOpinion('');
       setFeedbackText('');
@@ -194,6 +197,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
       locked: isLocked,
       goal,
       challenge,
+      reviewPeriod,
       adminChallenge,
       teamOpinion,
       feedback: feedbackText,
@@ -374,6 +378,26 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
         ) : (
           <div className="readonly-field">
             {(effectiveRole === 'admin' ? crossRecord?.challenge : challenge) || <span className="readonly-field-empty">まだ記入されていません</span>}
+          </div>
+        )}
+      </div>
+
+      {/* 本評価期間を振り返って：本人が入力、管理者は読み取り専用 */}
+      <div className="goal-input-section">
+        <label className="goal-input-label">本評価期間を振り返って</label>
+        {user.role === 'self' ? (
+          <textarea
+            className="goal-textarea"
+            value={reviewPeriod}
+            onChange={(e) => setReviewPeriod(e.target.value)}
+            onBlur={() => saveRecord(scores)}
+            placeholder="この評価期間を振り返って感じたこと・気づきを記入してください"
+            disabled={isLocked}
+            rows={3}
+          />
+        ) : (
+          <div className="readonly-field">
+            {(effectiveRole === 'admin' ? crossRecord?.reviewPeriod : reviewPeriod) || <span className="readonly-field-empty">まだ記入されていません</span>}
           </div>
         )}
       </div>

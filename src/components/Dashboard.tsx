@@ -52,6 +52,7 @@ function scoreLabel(score: Score | undefined): string {
 function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }: DashboardProps) {
   const [evaluations, setEvaluations] = useState<EvaluationRecord[]>([]);
   const [role, setRole] = useState<EvaluationRole>('self');
+  const [selectedMonth, setSelectedMonth] = useState<string>('');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [lineMetricId, setLineMetricId] = useState('total');
   const savedScrollY = useRef<number | null>(null);
@@ -60,9 +61,10 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
     apiLoadEvaluations().then(setEvaluations).catch(console.error);
   }, []);
 
-  // 対象者・評価種別が変わったら詳細を閉じる
+  // 対象者・評価種別が変わったら詳細を閉じ、面談月もリセット
   useEffect(() => {
     setSelectedCategoryId(null);
+    setSelectedMonth('');
   }, [employeeId, role]);
 
   // 詳細トグル時にスクロール位置を保持する
@@ -88,12 +90,34 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
     [filteredRecords]
   );
 
-  const latestRecord = sortedRecords[0] ?? null;
-  const previousRecord = sortedRecords[1] ?? null;
-
-  const months = useMemo(
-    () => Array.from(new Set(sortedRecords.map((r) => r.month))).sort(),
+  // 利用可能な月一覧（降順：新しい順）
+  const availableMonths = useMemo(
+    () => Array.from(new Set(sortedRecords.map((r) => r.month))).sort().reverse(),
     [sortedRecords]
+  );
+
+  // 有効な面談月（ユーザー選択 or 最新月）
+  const effectiveMonth = useMemo(() => {
+    if (selectedMonth && availableMonths.includes(selectedMonth)) return selectedMonth;
+    return availableMonths[0] ?? '';
+  }, [selectedMonth, availableMonths]);
+
+  // 選択月のレコード
+  const selectedRecord = useMemo(
+    () => sortedRecords.find((r) => r.month === effectiveMonth) ?? null,
+    [sortedRecords, effectiveMonth]
+  );
+
+  // 前回のレコード（選択月の1つ前）
+  const previousRecord = useMemo(() => {
+    const idx = sortedRecords.findIndex((r) => r.month === effectiveMonth);
+    return idx >= 0 && idx + 1 < sortedRecords.length ? sortedRecords[idx + 1] : null;
+  }, [sortedRecords, effectiveMonth]);
+
+  // 得点推移用の月一覧（昇順・選択月まで）
+  const months = useMemo(
+    () => availableMonths.slice().reverse().filter((m) => m <= effectiveMonth),
+    [availableMonths, effectiveMonth]
   );
 
   const lineMetricOptions = useMemo(() => [
@@ -105,10 +129,10 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
   const radarData = useMemo(() => {
     const labels = categories.map((c) => c.title);
     const datasets = [];
-    if (latestRecord) {
+    if (selectedRecord) {
       datasets.push({
-        label: `今回 (${latestRecord.month})`,
-        data: categories.map((cat) => calcCategoryScore(cat, latestRecord.level, latestRecord.scores).percent),
+        label: `今回 (${selectedRecord.month})`,
+        data: categories.map((cat) => calcCategoryScore(cat, selectedRecord.level, selectedRecord.scores).percent),
         backgroundColor: 'rgba(31, 100, 255, 0.18)',
         borderColor: '#1f64ff',
         borderWidth: 2,
@@ -126,7 +150,7 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
       });
     }
     return { labels, datasets };
-  }, [categories, latestRecord, previousRecord]);
+  }, [categories, selectedRecord, previousRecord]);
 
   const lineData = useMemo(() => {
     const selectedLabel = lineMetricOptions.find((o) => o.id === lineMetricId)?.label ?? '';
@@ -165,36 +189,37 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
     };
   }, [months, sortedRecords, lineMetricId, lineMetricOptions, categories]);
 
-  // 挑戦テキストがある最新の本人評価レコードを探す（月をまたいで）
-  const selfChallengeRecord = useMemo(
-    () => evaluations
-      .filter((r) => r.employeeId === employeeId && r.role === 'self' && !!r.challenge)
-      .sort((a, b) => b.month.localeCompare(a.month))[0] ?? null,
-    [evaluations, employeeId]
+  // 詳細分析: 選択月までの直近4回
+  const detailRecords = useMemo(() => {
+    const idx = sortedRecords.findIndex((r) => r.month === effectiveMonth);
+    const relevant = idx >= 0 ? sortedRecords.slice(idx) : sortedRecords;
+    return relevant.slice(0, 4).reverse();
+  }, [sortedRecords, effectiveMonth]);
+
+  // コメント表示: 選択した面談月の本人・管理者レコード
+  const monthSelfRecord = useMemo(
+    () => evaluations.find((r) => r.employeeId === employeeId && r.role === 'self' && r.month === effectiveMonth) ?? null,
+    [evaluations, employeeId, effectiveMonth]
   );
 
-  const latestAdminRecord = useMemo(
-    () => evaluations
-      .filter((r) => r.employeeId === employeeId && r.role === 'admin')
-      .sort((a, b) => b.month.localeCompare(a.month))[0] ?? null,
-    [evaluations, employeeId]
+  const monthAdminRecord = useMemo(
+    () => evaluations.find((r) => r.employeeId === employeeId && r.role === 'admin' && r.month === effectiveMonth) ?? null,
+    [evaluations, employeeId, effectiveMonth]
   );
 
-  const hasCommentData = !!(selfChallengeRecord || latestAdminRecord);
+  const hasCommentData = effectiveMonth !== '' && !!(monthSelfRecord || monthAdminRecord);
 
   const selectedCategory = categories.find((c) => c.id === selectedCategoryId) ?? null;
 
-  // 詳細表示: 直近4回 × flattenしたアイテム
-  const detailRecords = useMemo(() => sortedRecords.slice(0, 4).reverse(), [sortedRecords]);
-
+  // 詳細表示: 選択月のレベルに合わせてアイテムを取得
   const detailItems = useMemo(() => {
-    if (!selectedCategory || !latestRecord) return [];
+    if (!selectedCategory || !selectedRecord) return [];
     const levelCat = {
       ...selectedCategory,
-      subItems: selectedCategory.subItems.filter((s) => s.level === latestRecord.level),
+      subItems: selectedCategory.subItems.filter((s) => s.level === selectedRecord.level),
     };
     return flattenCategoryItems(levelCat);
-  }, [selectedCategory, latestRecord]);
+  }, [selectedCategory, selectedRecord]);
 
   return (
     <section className="card">
@@ -222,9 +247,19 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
             ))}
           </div>
         </div>
+        {availableMonths.length > 0 && (
+          <div className="field">
+            <label>面談月</label>
+            <select value={effectiveMonth} onChange={(e) => setSelectedMonth(e.target.value)}>
+              {availableMonths.map((m) => (
+                <option key={m} value={m}>{formatMonthLabel(m)}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
-      {latestRecord ? (
+      {selectedRecord ? (
         <>
           {previousRecord?.goal && (
             <div className="goal-display">
@@ -352,34 +387,36 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
 
       {hasCommentData && (
         <section className="category-card">
-          {latestAdminRecord && (
-            <div className="comment-interview-month">
-              <span className="comment-interview-month-label">面談月</span>
-              <span>{formatMonthLabel(latestAdminRecord.month)}</span>
-            </div>
-          )}
+          <div className="comment-interview-month">
+            <span className="comment-interview-month-label">面談月</span>
+            <span>{formatMonthLabel(effectiveMonth)}</span>
+          </div>
           <div className="comment-section-header">今後挑戦したいこと / 挑戦してほしいこと</div>
           <div className="comment-two-col">
             <div className="comment-cell">
               <div className="comment-cell-label">本人</div>
               <div className="comment-cell-text">
-                {selfChallengeRecord?.challenge || <span className="comment-cell-empty">まだ記入されていません</span>}
+                {monthSelfRecord?.challenge || <span className="comment-cell-empty">まだ記入されていません</span>}
               </div>
             </div>
             <div className="comment-cell">
               <div className="comment-cell-label">管理者</div>
               <div className="comment-cell-text">
-                {latestAdminRecord?.adminChallenge || <span className="comment-cell-empty">まだ記入されていません</span>}
+                {monthAdminRecord?.adminChallenge || <span className="comment-cell-empty">まだ記入されていません</span>}
               </div>
             </div>
           </div>
+          <div className="comment-section-header">本評価期間を振り返って</div>
+          <div className="comment-cell-text">
+            {monthSelfRecord?.reviewPeriod || <span className="comment-cell-empty">まだ記入されていません</span>}
+          </div>
           <div className="comment-section-header">チーム・会社への意見や相談</div>
           <div className="comment-cell-text">
-            {latestAdminRecord?.teamOpinion || <span className="comment-cell-empty">まだ記入されていません</span>}
+            {monthAdminRecord?.teamOpinion || <span className="comment-cell-empty">まだ記入されていません</span>}
           </div>
           <div className="comment-section-header">フィードバック内容</div>
           <div className="comment-cell-text">
-            {latestAdminRecord?.feedback || <span className="comment-cell-empty">まだ記入されていません</span>}
+            {monthAdminRecord?.feedback || <span className="comment-cell-empty">まだ記入されていません</span>}
           </div>
         </section>
       )}
