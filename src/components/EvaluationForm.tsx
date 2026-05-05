@@ -365,7 +365,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
       {/* 今後挑戦したいこと：本人が入力、管理者は読み取り専用 */}
       <div className="goal-input-section">
         <label className="goal-input-label">今後挑戦したいこと（あれば記入）</label>
-        {user.role === 'self' ? (
+        {effectiveRole === 'self' ? (
           <textarea
             className="goal-textarea"
             value={challenge}
@@ -377,7 +377,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
           />
         ) : (
           <div className="readonly-field">
-            {(effectiveRole === 'admin' ? crossRecord?.challenge : challenge) || <span className="readonly-field-empty">まだ記入されていません</span>}
+            {crossRecord?.challenge || <span className="readonly-field-empty">まだ記入されていません</span>}
           </div>
         )}
       </div>
@@ -385,7 +385,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
       {/* 本評価期間を振り返って：本人が入力、管理者は読み取り専用 */}
       <div className="goal-input-section">
         <label className="goal-input-label">本評価期間を振り返って</label>
-        {user.role === 'self' ? (
+        {effectiveRole === 'self' ? (
           <textarea
             className="goal-textarea"
             value={reviewPeriod}
@@ -397,7 +397,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
           />
         ) : (
           <div className="readonly-field">
-            {(effectiveRole === 'admin' ? crossRecord?.reviewPeriod : reviewPeriod) || <span className="readonly-field-empty">まだ記入されていません</span>}
+            {crossRecord?.reviewPeriod || <span className="readonly-field-empty">まだ記入されていません</span>}
           </div>
         )}
       </div>
