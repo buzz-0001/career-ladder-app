@@ -24,6 +24,13 @@ const categoryGroups = [
   { label: '自己管理', ids: ['jiko', 'kenko'] },
 ];
 
+/** 採点未完了警告の対象ラダーレベル（初級者・業務遂行・リーダー・管理者） */
+const levelsWithUncheckedScoreWarning: LadderLevel[] = [1, 2, 3, 4];
+
+function isScoreRecorded(score: Score | undefined): boolean {
+  return score === 0 || score === 1 || score === 2 || score === 'excluded';
+}
+
 function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories, employees, user }: EvaluationFormProps) {
   const [evaluations, setEvaluations] = useState<EvaluationRecord[]>([]);
   const [month, setMonth] = useState('2025-01');
@@ -40,6 +47,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
   const [teamOpinion, setTeamOpinion] = useState('');
   const [feedbackText, setFeedbackText] = useState('');
   const [currentCategoryIndex, setCurrentCategoryIndex] = useState(0);
+  const [pendingNavigateDirection, setPendingNavigateDirection] = useState<'prev' | 'next' | null>(null);
   const modalContentRef = useRef<HTMLDivElement>(null);
   const modalItemsRef = useRef<HTMLDivElement>(null);
 
@@ -163,27 +171,23 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
   };
 
   const closeModal = () => {
+    setPendingNavigateDirection(null);
     setModalOpen(false);
   };
 
-  const saveAndNavigate = (direction: 'prev' | 'next') => {
-    const nextIndex = direction === 'prev' 
-      ? (currentCategoryIndex - 1 + visibleCategories.length) % visibleCategories.length
-      : (currentCategoryIndex + 1) % visibleCategories.length;
-    setCurrentCategoryIndex(nextIndex);
+  const getCategoryUncheckedCount = (category: Category) => {
+    const items = flattenCategoryItems(category);
+    return items.filter((item) => !isScoreRecorded(scores[item.id])).length;
   };
+
+  /** 採点モーダルで表示中のカテゴリ内の未チェック数（ナビ警告はこれのみで判定） */
+  const currentModalCategoryUncheckedCount =
+    currentCategoryIndex >= 0 && currentCategoryIndex < visibleCategories.length
+      ? getCategoryUncheckedCount(visibleCategories[currentCategoryIndex])
+      : 0;
 
   const currentRecord = evaluations.find((r) => r.id === currentRecordId) ?? null;
   const isLocked = currentRecord?.locked ?? false;
-
-  const handleToggleLock = async () => {
-    if (!currentRecord) return;
-    const nextLocked = !isLocked;
-    await apiLockEvaluation(currentRecord.id, nextLocked).catch(console.error);
-    setEvaluations((prev) =>
-      prev.map((r) => r.id === currentRecord.id ? { ...r, locked: nextLocked } : r)
-    );
-  };
 
   const saveRecord = (nextScores: Record<string, Score>) => {
     if (isLocked && user.role !== 'admin') return;
@@ -217,6 +221,42 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
     };
     setScores(nextScores);
     saveRecord(nextScores);
+  };
+
+  /** 確定済みで本人のみのときは採点できないため、未チェック警告は出さない */
+  const shouldWarnUncheckedOnNavigate =
+    levelsWithUncheckedScoreWarning.includes(level) && (!isLocked || user.role === 'admin');
+
+  const performCategoryNavigate = (direction: 'prev' | 'next') => {
+    const nextIndex = direction === 'prev'
+      ? (currentCategoryIndex - 1 + visibleCategories.length) % visibleCategories.length
+      : (currentCategoryIndex + 1) % visibleCategories.length;
+    setCurrentCategoryIndex(nextIndex);
+  };
+
+  const onSaveAndNavigate = (direction: 'prev' | 'next') => {
+    saveRecord(scores);
+    if (shouldWarnUncheckedOnNavigate && currentModalCategoryUncheckedCount > 0) {
+      setPendingNavigateDirection(direction);
+      return;
+    }
+    performCategoryNavigate(direction);
+  };
+
+  const confirmPendingNavigate = () => {
+    if (pendingNavigateDirection) performCategoryNavigate(pendingNavigateDirection);
+    setPendingNavigateDirection(null);
+  };
+
+  const cancelPendingNavigate = () => setPendingNavigateDirection(null);
+
+  const handleToggleLock = async () => {
+    if (!currentRecord) return;
+    const nextLocked = !isLocked;
+    await apiLockEvaluation(currentRecord.id, nextLocked).catch(console.error);
+    setEvaluations((prev) =>
+      prev.map((r) => r.id === currentRecord.id ? { ...r, locked: nextLocked } : r)
+    );
   };
 
   const excludedCount = Object.values(scores).filter((score) => score === 'excluded').length;
@@ -468,10 +508,16 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
       <div className="data-grid">
         {visibleCategories.map((category, index) => {
           const categoryScore = getCategoryScore(category);
+          const uncheckedInCategory = getCategoryUncheckedCount(category);
           return (
             <section key={category.id} className="category-card">
               <div className="category-card-header">
-                <h3>{category.title}</h3>
+                <h3 className="category-card-title-line">
+                  <span className="category-card-title-text">{category.title}</span>
+                  {shouldWarnUncheckedOnNavigate && uncheckedInCategory > 0 ? (
+                    <span className="category-unchecked-hint">未チェック項目{uncheckedInCategory}個</span>
+                  ) : null}
+                </h3>
                 <div className="category-actions">
                   <button type="button" className="primary-button" onClick={() => openModal(index)}>
                     採点する
@@ -494,6 +540,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
       </div>
 
       {modalOpen && currentCategoryIndex >= 0 && currentCategoryIndex < visibleCategories.length && (
+        <>
         <div className="modal-overlay" onClick={closeModal}>
           <div className="modal-content" ref={modalContentRef} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
@@ -550,16 +597,59 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
                   : 0}%</div>
               </div>
               <div className="modal-buttons">
-                <button type="button" className="secondary-button" onClick={() => saveAndNavigate('prev')}>
+                <button type="button" className="secondary-button" onClick={() => onSaveAndNavigate('prev')}>
                   保存して前に戻る
                 </button>
-                <button type="button" className="primary-button" onClick={() => saveAndNavigate('next')}>
+                <button type="button" className="primary-button" onClick={() => onSaveAndNavigate('next')}>
                   保存して次に進む
                 </button>
               </div>
             </div>
           </div>
         </div>
+        {pendingNavigateDirection !== null && (
+          <div className="modal-overlay modal-overlay--warning" onClick={cancelPendingNavigate}>
+            <div
+              className="modal-content modal-content--warning"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="nav-unchecked-confirm-heading"
+              aria-describedby="nav-unchecked-confirm-desc"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="modal-header modal-header--warning">
+                <h3 id="nav-unchecked-confirm-heading" className="modal-warning-title">
+                  <span className="modal-warning-title-icon" aria-hidden="true">⚠️</span>
+                  警告
+                </h3>
+                <button
+                  type="button"
+                  className="close-button close-button--warning"
+                  onClick={cancelPendingNavigate}
+                  aria-label="閉じる（移動をキャンセル）"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="modal-warning-body">
+                <p id="nav-unchecked-confirm-desc" className="nav-unchecked-confirm-message">
+                  まだ未チェックの項目が{currentModalCategoryUncheckedCount}個あります。移動してもよろしいですか？
+                </p>
+              </div>
+              <div className="modal-footer modal-footer--warning">
+                <div className="modal-buttons modal-buttons--warning">
+                  <button type="button" className="secondary-button" onClick={cancelPendingNavigate}>
+                    いいえ
+                  </button>
+                  <button type="button" className="primary-button primary-button--warning-confirm" onClick={confirmPendingNavigate}>
+                    はい
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        </>
       )}
 
       {/* ─── 昇格基準モーダル ─── */}
