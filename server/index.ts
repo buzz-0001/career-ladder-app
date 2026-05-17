@@ -7,7 +7,7 @@ import path from 'path';
 import XLSX from 'xlsx';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { pool, initializeDatabase } from './db.js';
+import { pool, initializeDatabase, isUniqueViolation, isRowLocked } from './db.js';
 import type { Category, EvaluationRecord, LadderLevel, Score } from '../src/types';
 
 dotenv.config();
@@ -64,13 +64,17 @@ function authenticate(req: AuthRequest, res: Response, next: NextFunction): void
   }
 }
 
+function toLadderLevel(value: unknown): LadderLevel {
+  return Number(value) as LadderLevel;
+}
+
 // ─── 認証ルート ───────────────────────────────────────────────────────────
 
 app.post('/api/auth/login', async (req: Request, res: Response) => {
   const { username, password } = req.body as { username: string; password: string };
   try {
-    const [rows] = await pool.execute('SELECT * FROM users WHERE username = ?', [username]) as any;
-    const row = rows[0];
+    const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+    const row = result.rows[0];
     if (!row || !bcrypt.compareSync(password, row.password_hash)) {
       res.status(401).json({ error: 'ユーザー名またはパスワードが正しくありません。' });
       return;
@@ -102,10 +106,10 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 
 app.get('/api/employees', authenticate, async (_req: AuthRequest, res: Response) => {
   try {
-    const [rows] = await pool.execute(
+    const result = await pool.query(
       'SELECT e.id, e.name FROM employees e INNER JOIN users u ON u.employee_id = e.id ORDER BY e.id'
-    ) as any;
-    res.json(rows);
+    );
+    res.json(result.rows);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'サーバーエラーが発生しました' });
@@ -117,20 +121,19 @@ app.get('/api/employees', authenticate, async (_req: AuthRequest, res: Response)
 app.get('/api/evaluations', authenticate, async (req: AuthRequest, res: Response) => {
   const user = req.user!;
   try {
-    const [rows] = (user.role === 'admin'
-      ? await pool.execute('SELECT * FROM evaluations ORDER BY updated_at DESC')
-      : await pool.execute('SELECT * FROM evaluations WHERE employee_id = ? ORDER BY updated_at DESC', [user.employeeId])
-    ) as any;
+    const result = user.role === 'admin'
+      ? await pool.query('SELECT * FROM evaluations ORDER BY updated_at DESC')
+      : await pool.query('SELECT * FROM evaluations WHERE employee_id = $1 ORDER BY updated_at DESC', [user.employeeId]);
 
     const records: EvaluationRecord[] = await Promise.all(
-      (rows as any[]).map(async (row) => {
-        const [scoreRows] = await pool.execute(
-          'SELECT item_id, score FROM evaluation_scores WHERE evaluation_id = ?',
+      result.rows.map(async (row) => {
+        const scoreResult = await pool.query(
+          'SELECT item_id, score FROM evaluation_scores WHERE evaluation_id = $1',
           [row.id]
-        ) as any;
+        );
 
         const scores: Record<string, Score> = {};
-        for (const s of scoreRows as any[]) {
+        for (const s of scoreResult.rows) {
           scores[s.item_id] = (s.score === 'excluded' ? 'excluded' : Number(s.score)) as Score;
         }
 
@@ -139,9 +142,9 @@ app.get('/api/evaluations', authenticate, async (req: AuthRequest, res: Response
           employeeId: row.employee_id,
           employeeName: row.employee_name,
           month: row.month,
-          level: row.level as LadderLevel,
+          level: toLadderLevel(row.level),
           role: row.role,
-          locked: row.locked === 1,
+          locked: isRowLocked(row.locked),
           goal: row.goal ?? '',
           challenge: row.challenge ?? '',
           reviewPeriod: row.review_period ?? '',
@@ -170,53 +173,67 @@ app.post('/api/evaluations', authenticate, async (req: AuthRequest, res: Respons
     return;
   }
 
-  const conn = await pool.getConnection();
+  const client = await pool.connect();
   try {
-    const [existing] = await conn.execute(
-      'SELECT locked FROM evaluations WHERE id = ?',
-      [record.id]
-    ) as any;
-    if (existing[0]?.locked === 1 && user.role !== 'admin') {
+    const existing = await client.query('SELECT locked FROM evaluations WHERE id = $1', [record.id]);
+    if (isRowLocked(existing.rows[0]?.locked) && user.role !== 'admin') {
       res.status(403).json({ error: 'この評価は確定済みのため編集できません' });
       return;
     }
 
-    await conn.beginTransaction();
+    await client.query('BEGIN');
 
-    await conn.execute(`
-      INSERT INTO evaluations (id, employee_id, employee_name, month, level, role, locked, goal, challenge, review_period, admin_challenge, team_opinion, feedback, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE
-        employee_name   = VALUES(employee_name),
-        month           = VALUES(month),
-        level           = VALUES(level),
-        role            = VALUES(role),
-        goal            = VALUES(goal),
-        challenge       = VALUES(challenge),
-        review_period   = VALUES(review_period),
-        admin_challenge = VALUES(admin_challenge),
-        team_opinion    = VALUES(team_opinion),
-        feedback        = VALUES(feedback),
-        updated_at      = VALUES(updated_at)
-    `, [record.id, record.employeeId, record.employeeName, record.month, record.level, record.role, record.goal ?? null, record.challenge ?? null, record.reviewPeriod ?? null, record.adminChallenge ?? null, record.teamOpinion ?? null, record.feedback ?? null, record.updatedAt]);
+    await client.query(
+      `INSERT INTO evaluations (
+        id, employee_id, employee_name, month, level, role, locked,
+        goal, challenge, review_period, admin_challenge, team_opinion, feedback, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, false, $7, $8, $9, $10, $11, $12, $13)
+      ON CONFLICT (id) DO UPDATE SET
+        employee_name   = EXCLUDED.employee_name,
+        month           = EXCLUDED.month,
+        level           = EXCLUDED.level,
+        role            = EXCLUDED.role,
+        goal            = EXCLUDED.goal,
+        challenge       = EXCLUDED.challenge,
+        review_period   = EXCLUDED.review_period,
+        admin_challenge = EXCLUDED.admin_challenge,
+        team_opinion    = EXCLUDED.team_opinion,
+        feedback        = EXCLUDED.feedback,
+        updated_at      = EXCLUDED.updated_at`,
+      [
+        record.id,
+        record.employeeId,
+        record.employeeName,
+        record.month,
+        record.level,
+        record.role,
+        record.goal ?? null,
+        record.challenge ?? null,
+        record.reviewPeriod ?? null,
+        record.adminChallenge ?? null,
+        record.teamOpinion ?? null,
+        record.feedback ?? null,
+        record.updatedAt,
+      ]
+    );
 
-    await conn.execute('DELETE FROM evaluation_scores WHERE evaluation_id = ?', [record.id]);
+    await client.query('DELETE FROM evaluation_scores WHERE evaluation_id = $1', [record.id]);
 
     for (const [itemId, score] of Object.entries(record.scores)) {
-      await conn.execute(
-        'INSERT INTO evaluation_scores (evaluation_id, item_id, score) VALUES (?, ?, ?)',
+      await client.query(
+        'INSERT INTO evaluation_scores (evaluation_id, item_id, score) VALUES ($1, $2, $3)',
         [record.id, itemId, String(score)]
       );
     }
 
-    await conn.commit();
+    await client.query('COMMIT');
     res.json({ success: true });
   } catch (err) {
-    await conn.rollback();
+    await client.query('ROLLBACK');
     console.error(err);
     res.status(500).json({ error: 'サーバーエラーが発生しました' });
   } finally {
-    conn.release();
+    client.release();
   }
 });
 
@@ -227,11 +244,11 @@ app.put('/api/evaluations/:id/lock', authenticate, async (req: AuthRequest, res:
   }
   const { locked } = req.body as { locked: boolean };
   try {
-    const [result] = await pool.execute(
-      'UPDATE evaluations SET locked = ? WHERE id = ?',
-      [locked ? 1 : 0, req.params.id]
-    ) as any;
-    if (result.affectedRows === 0) {
+    const result = await pool.query(
+      'UPDATE evaluations SET locked = $1 WHERE id = $2',
+      [locked, req.params.id]
+    );
+    if (result.rowCount === 0) {
       res.status(404).json({ error: '評価レコードが見つかりません' });
       return;
     }
@@ -247,8 +264,10 @@ app.put('/api/evaluations/:id/lock', authenticate, async (req: AuthRequest, res:
 app.get('/api/admin/users', authenticate, async (req: AuthRequest, res: Response) => {
   if (req.user!.role !== 'admin') { res.status(403).json({ error: '管理者のみアクセス可能です' }); return; }
   try {
-    const [rows] = await pool.execute('SELECT id, username, display_name, role, employee_id, department FROM users ORDER BY id') as any;
-    res.json(rows.map((u: any) => ({
+    const result = await pool.query(
+      'SELECT id, username, display_name, role, employee_id, department FROM users ORDER BY id'
+    );
+    res.json(result.rows.map((u) => ({
       id: u.id,
       username: u.username,
       displayName: u.display_name,
@@ -268,34 +287,35 @@ app.post('/api/admin/users', authenticate, async (req: AuthRequest, res: Respons
     username: string; displayName: string; password: string; role: string; department?: string;
   };
   if (!username || !displayName || !password || !role) { res.status(400).json({ error: '必須項目が不足しています' }); return; }
-  const conn = await pool.getConnection();
+  const client = await pool.connect();
   try {
-    const [result] = await conn.execute(
-      'INSERT INTO users (username, display_name, password_hash, role, department) VALUES (?, ?, ?, ?, ?)',
+    const insertResult = await client.query(
+      'INSERT INTO users (username, display_name, password_hash, role, department) VALUES ($1, $2, $3, $4, $5) RETURNING id',
       [username, displayName, bcrypt.hashSync(password, 10), role, department || null]
-    ) as any;
+    );
+    const userId = insertResult.rows[0].id as number;
 
-    // self ロールのユーザーには社員IDを自動採番し employees テーブルにも同期
     let employeeId: string | null = null;
     if (role === 'self') {
-      employeeId = `emp-${result.insertId}`;
-      await conn.execute('UPDATE users SET employee_id = ? WHERE id = ?', [employeeId, result.insertId]);
-      await conn.execute(
-        'INSERT INTO employees (id, name) VALUES (?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name)',
+      employeeId = `emp-${userId}`;
+      await client.query('UPDATE users SET employee_id = $1 WHERE id = $2', [employeeId, userId]);
+      await client.query(
+        `INSERT INTO employees (id, name) VALUES ($1, $2)
+         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`,
         [employeeId, displayName]
       );
     }
 
-    res.json({ id: result.insertId, username, displayName, role, employeeId, department: department || null });
-  } catch (err: any) {
-    if (err.code === 'ER_DUP_ENTRY') {
+    res.json({ id: userId, username, displayName, role, employeeId, department: department || null });
+  } catch (err) {
+    if (isUniqueViolation(err)) {
       res.status(409).json({ error: 'そのユーザー名は既に使用されています' });
     } else {
       console.error(err);
       res.status(500).json({ error: 'ユーザーの作成に失敗しました' });
     }
   } finally {
-    conn.release();
+    client.release();
   }
 });
 
@@ -304,33 +324,32 @@ app.put('/api/admin/users/:id', authenticate, async (req: AuthRequest, res: Resp
   const { displayName, role, department, password } = req.body as {
     displayName: string; role: string; department?: string; password?: string;
   };
-  const conn = await pool.getConnection();
+  const client = await pool.connect();
   try {
-    const [rows] = await conn.execute('SELECT employee_id FROM users WHERE id = ?', [req.params.id]) as any;
-    const currentEmpId: string | null = rows[0]?.employee_id ?? null;
+    const rowsResult = await client.query('SELECT employee_id FROM users WHERE id = $1', [req.params.id]);
+    const currentEmpId: string | null = rowsResult.rows[0]?.employee_id ?? null;
 
     if (password) {
-      await conn.execute(
-        'UPDATE users SET display_name = ?, role = ?, department = ?, password_hash = ? WHERE id = ?',
+      await client.query(
+        'UPDATE users SET display_name = $1, role = $2, department = $3, password_hash = $4 WHERE id = $5',
         [displayName, role, department || null, bcrypt.hashSync(password, 10), req.params.id]
       );
     } else {
-      await conn.execute(
-        'UPDATE users SET display_name = ?, role = ?, department = ? WHERE id = ?',
+      await client.query(
+        'UPDATE users SET display_name = $1, role = $2, department = $3 WHERE id = $4',
         [displayName, role, department || null, req.params.id]
       );
     }
 
     if (role === 'self') {
       if (currentEmpId) {
-        // 表示名が変わった場合に employees テーブルも更新
-        await conn.execute('UPDATE employees SET name = ? WHERE id = ?', [displayName, currentEmpId]);
+        await client.query('UPDATE employees SET name = $1 WHERE id = $2', [displayName, currentEmpId]);
       } else {
-        // admin → self へのロール変更時に社員IDを新規採番
         const empId = `emp-${req.params.id}`;
-        await conn.execute('UPDATE users SET employee_id = ? WHERE id = ?', [empId, req.params.id]);
-        await conn.execute(
-          'INSERT INTO employees (id, name) VALUES (?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name)',
+        await client.query('UPDATE users SET employee_id = $1 WHERE id = $2', [empId, req.params.id]);
+        await client.query(
+          `INSERT INTO employees (id, name) VALUES ($1, $2)
+           ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name`,
           [empId, displayName]
         );
       }
@@ -341,7 +360,7 @@ app.put('/api/admin/users/:id', authenticate, async (req: AuthRequest, res: Resp
     console.error(err);
     res.status(500).json({ error: 'サーバーエラーが発生しました' });
   } finally {
-    conn.release();
+    client.release();
   }
 });
 
@@ -349,11 +368,11 @@ app.delete('/api/admin/users/:id', authenticate, async (req: AuthRequest, res: R
   if (req.user!.role !== 'admin') { res.status(403).json({ error: '管理者のみアクセス可能です' }); return; }
   if (String(req.params.id) === String(req.user!.id)) { res.status(400).json({ error: '自分自身は削除できません' }); return; }
   try {
-    const [rows] = await pool.execute('SELECT employee_id FROM users WHERE id = ?', [req.params.id]) as any;
-    const employeeId = rows[0]?.employee_id ?? null;
-    await pool.execute('DELETE FROM users WHERE id = ?', [req.params.id]);
+    const rowsResult = await pool.query('SELECT employee_id FROM users WHERE id = $1', [req.params.id]);
+    const employeeId = rowsResult.rows[0]?.employee_id ?? null;
+    await pool.query('DELETE FROM users WHERE id = $1', [req.params.id]);
     if (employeeId) {
-      await pool.execute('DELETE FROM employees WHERE id = ?', [employeeId]);
+      await pool.query('DELETE FROM employees WHERE id = $1', [employeeId]);
     }
     res.json({ success: true });
   } catch (err) {
@@ -369,10 +388,10 @@ app.post('/api/admin/employees', authenticate, async (req: AuthRequest, res: Res
   const { id, name } = req.body as { id: string; name: string };
   if (!id || !name) { res.status(400).json({ error: '社員IDと名前は必須です' }); return; }
   try {
-    await pool.execute('INSERT INTO employees (id, name) VALUES (?, ?)', [id, name]);
+    await pool.query('INSERT INTO employees (id, name) VALUES ($1, $2)', [id, name]);
     res.json({ id, name });
-  } catch (err: any) {
-    if (err.code === 'ER_DUP_ENTRY') {
+  } catch (err) {
+    if (isUniqueViolation(err)) {
       res.status(409).json({ error: 'その社員IDは既に存在します' });
     } else {
       console.error(err);
@@ -385,7 +404,7 @@ app.put('/api/admin/employees/:id', authenticate, async (req: AuthRequest, res: 
   if (req.user!.role !== 'admin') { res.status(403).json({ error: '管理者のみアクセス可能です' }); return; }
   const { name } = req.body as { name: string };
   try {
-    await pool.execute('UPDATE employees SET name = ? WHERE id = ?', [name, req.params.id]);
+    await pool.query('UPDATE employees SET name = $1 WHERE id = $2', [name, req.params.id]);
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -396,7 +415,7 @@ app.put('/api/admin/employees/:id', authenticate, async (req: AuthRequest, res: 
 app.delete('/api/admin/employees/:id', authenticate, async (req: AuthRequest, res: Response) => {
   if (req.user!.role !== 'admin') { res.status(403).json({ error: '管理者のみアクセス可能です' }); return; }
   try {
-    await pool.execute('DELETE FROM employees WHERE id = ?', [req.params.id]);
+    await pool.query('DELETE FROM employees WHERE id = $1', [req.params.id]);
     res.json({ success: true });
   } catch (err) {
     console.error(err);

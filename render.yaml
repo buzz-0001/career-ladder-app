@@ -1,0 +1,19 @@
+# Render Blueprint（Web Service）
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: career-ladder-app
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: OPENAI_API_KEY
+        sync: false
+        optional: true
