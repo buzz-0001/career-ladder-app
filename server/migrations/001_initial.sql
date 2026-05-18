@@ -39,3 +39,12 @@ CREATE TABLE IF NOT EXISTS evaluation_scores (
   PRIMARY KEY (evaluation_id, item_id),
   FOREIGN KEY (evaluation_id) REFERENCES evaluations(id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_evaluations_employee_role_month
+  ON evaluations (employee_id, role, month DESC);
+
+CREATE INDEX IF NOT EXISTS idx_evaluations_updated_at
+  ON evaluations (updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_evaluation_scores_evaluation_id
+  ON evaluation_scores (evaluation_id);

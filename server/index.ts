@@ -125,37 +125,39 @@ app.get('/api/evaluations', authenticate, async (req: AuthRequest, res: Response
       ? await pool.query('SELECT * FROM evaluations ORDER BY updated_at DESC')
       : await pool.query('SELECT * FROM evaluations WHERE employee_id = $1 ORDER BY updated_at DESC', [user.employeeId]);
 
-    const records: EvaluationRecord[] = await Promise.all(
-      result.rows.map(async (row) => {
-        const scoreResult = await pool.query(
-          'SELECT item_id, score FROM evaluation_scores WHERE evaluation_id = $1',
-          [row.id]
-        );
+    const evaluationIds = result.rows.map((row) => row.id);
+    const scoresByEvaluationId = new Map<string, Record<string, Score>>();
 
-        const scores: Record<string, Score> = {};
-        for (const s of scoreResult.rows) {
-          scores[s.item_id] = (s.score === 'excluded' ? 'excluded' : Number(s.score)) as Score;
-        }
+    if (evaluationIds.length > 0) {
+      const scoreResult = await pool.query(
+        'SELECT evaluation_id, item_id, score FROM evaluation_scores WHERE evaluation_id = ANY($1::varchar[])',
+        [evaluationIds]
+      );
 
-        return {
-          id: row.id,
-          employeeId: row.employee_id,
-          employeeName: row.employee_name,
-          month: row.month,
-          level: toLadderLevel(row.level),
-          role: row.role,
-          locked: isRowLocked(row.locked),
-          goal: row.goal ?? '',
-          challenge: row.challenge ?? '',
-          reviewPeriod: row.review_period ?? '',
-          adminChallenge: row.admin_challenge ?? '',
-          teamOpinion: row.team_opinion ?? '',
-          feedback: row.feedback ?? '',
-          scores,
-          updatedAt: row.updated_at,
-        };
-      })
-    );
+      for (const s of scoreResult.rows) {
+        const scores = scoresByEvaluationId.get(s.evaluation_id) ?? {};
+        scores[s.item_id] = (s.score === 'excluded' ? 'excluded' : Number(s.score)) as Score;
+        scoresByEvaluationId.set(s.evaluation_id, scores);
+      }
+    }
+
+    const records: EvaluationRecord[] = result.rows.map((row) => ({
+      id: row.id,
+      employeeId: row.employee_id,
+      employeeName: row.employee_name,
+      month: row.month,
+      level: toLadderLevel(row.level),
+      role: row.role,
+      locked: isRowLocked(row.locked),
+      goal: row.goal ?? '',
+      challenge: row.challenge ?? '',
+      reviewPeriod: row.review_period ?? '',
+      adminChallenge: row.admin_challenge ?? '',
+      teamOpinion: row.team_opinion ?? '',
+      feedback: row.feedback ?? '',
+      scores: scoresByEvaluationId.get(row.id) ?? {},
+      updatedAt: row.updated_at,
+    }));
 
     res.json(records);
   } catch (err) {
