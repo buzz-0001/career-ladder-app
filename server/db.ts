@@ -20,7 +20,7 @@ export const pool = new pg.Pool({
   ssl: databaseUrl?.includes('localhost') || databaseUrl?.includes('127.0.0.1')
     ? undefined
     : { rejectUnauthorized: false },
-  max: 10,
+  max: 5,
 });
 
 export function isUniqueViolation(err: unknown): boolean {

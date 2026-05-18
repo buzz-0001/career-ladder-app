@@ -431,6 +431,13 @@
   color: #b91c1c;
 }
 
+.save-error-text {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
 .import-card {
   display: grid;
   gap: 16px;

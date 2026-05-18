@@ -48,6 +48,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
   const [feedbackText, setFeedbackText] = useState('');
   const [currentCategoryIndex, setCurrentCategoryIndex] = useState(0);
   const [pendingNavigateDirection, setPendingNavigateDirection] = useState<'prev' | 'next' | null>(null);
+  const [saveError, setSaveError] = useState('');
   const modalContentRef = useRef<HTMLDivElement>(null);
   const modalItemsRef = useRef<HTMLDivElement>(null);
 
@@ -211,8 +212,13 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
     if (isLocked && user.role !== 'admin') return;
     const record = buildEvaluationRecord(nextScores);
     setEvaluations((prev) => [...prev.filter((item) => item.id !== record.id), record]);
-    setSavedAt(new Date().toLocaleString());
-    apiSaveEvaluation(record).catch(console.error);
+    setSaveError('');
+    apiSaveEvaluation(record)
+      .then(() => setSavedAt(new Date().toLocaleString()))
+      .catch((err) => {
+        console.error(err);
+        setSaveError(err instanceof Error ? err.message : '保存に失敗しました。通信状態を確認してください。');
+      });
   };
 
   const handleScoreChange = (subItemId: string, value: Score) => {
@@ -259,6 +265,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
         await apiSaveEvaluation(record);
       }
       await apiLockEvaluation(record.id, nextLocked);
+      setSaveError('');
       setEvaluations((prev) => [
         ...prev.filter((r) => r.id !== record.id),
         { ...record, locked: nextLocked, updatedAt: new Date().toISOString() }
@@ -266,6 +273,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
       setSavedAt(new Date().toLocaleString());
     } catch (err) {
       console.error(err);
+      setSaveError(err instanceof Error ? err.message : '確定操作に失敗しました。通信状態を確認してください。');
     }
   };
 
@@ -371,6 +379,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
           <strong>最終保存</strong>
           {savedAt || 'まだ保存されていません'}
           {isLocked && <div className="locked-badge">🔒 確定済み</div>}
+          {saveError && <div className="error-text save-error-text">{saveError}</div>}
           {user.role === 'admin' && (
             <button
               type="button"

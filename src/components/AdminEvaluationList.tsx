@@ -31,13 +31,22 @@ function AdminEvaluationList({ employees, categories, user }: AdminEvaluationLis
   const [filterLocked, setFilterLocked] = useState<'' | 'locked' | 'unlocked'>('');
   const [deleteTarget, setDeleteTarget] = useState<EvaluationRecord | null>(null);
   const [deleteError, setDeleteError] = useState('');
+  const [actionError, setActionError] = useState('');
 
   // 完了状況フィルタ
   const [statusMonth, setStatusMonth] = useState('');
   const [statusLevel, setStatusLevel] = useState<LadderLevel>(1);
 
   useEffect(() => {
-    apiLoadEvaluations().then(setEvaluations).catch(console.error);
+    apiLoadEvaluations()
+      .then((records) => {
+        setEvaluations(records);
+        setActionError('');
+      })
+      .catch((err) => {
+        console.error(err);
+        setActionError(err instanceof Error ? err.message : '評価データの取得に失敗しました');
+      });
   }, []);
 
   const allMonths = useMemo(
@@ -64,8 +73,14 @@ function AdminEvaluationList({ employees, categories, user }: AdminEvaluationLis
 
   const handleToggleLock = async (record: EvaluationRecord) => {
     const nextLocked = !record.locked;
-    await apiLockEvaluation(record.id, nextLocked).catch(console.error);
-    setEvaluations((prev) => prev.map((r) => r.id === record.id ? { ...r, locked: nextLocked } : r));
+    setActionError('');
+    try {
+      await apiLockEvaluation(record.id, nextLocked);
+      setEvaluations((prev) => prev.map((r) => r.id === record.id ? { ...r, locked: nextLocked } : r));
+    } catch (err) {
+      console.error(err);
+      setActionError(err instanceof Error ? err.message : '確定状態の更新に失敗しました');
+    }
   };
 
   const handleDeleteEvaluation = async () => {
@@ -74,6 +89,7 @@ function AdminEvaluationList({ employees, categories, user }: AdminEvaluationLis
     try {
       await apiDeleteEvaluation(deleteTarget.id);
       setEvaluations((prev) => prev.filter((r) => r.id !== deleteTarget.id));
+      setActionError('');
       setDeleteTarget(null);
     } catch (err) {
       console.error(err);
@@ -163,6 +179,8 @@ function AdminEvaluationList({ employees, categories, user }: AdminEvaluationLis
           </button>
         </div>
       </div>
+
+      {actionError && <div className="error-banner">{actionError}</div>}
 
       {/* ─── 一覧ビュー ─── */}
       {viewMode === 'list' && (
