@@ -261,6 +261,13 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
 
       {selectedRecord ? (
         <>
+          <div className="goal-display">
+            <div className="goal-display-label">今回 ({selectedRecord.month}) の3か月後の目標</div>
+            <p className="goal-display-text">
+              {selectedRecord.goal || <span className="comment-cell-empty">まだ記入されていません</span>}
+            </p>
+          </div>
+
           {previousRecord?.goal && (
             <div className="goal-display">
               <div className="goal-display-label">前回 ({previousRecord.month}) の3か月後の目標</div>

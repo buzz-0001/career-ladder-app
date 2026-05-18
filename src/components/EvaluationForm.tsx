@@ -189,16 +189,14 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
   const currentRecord = evaluations.find((r) => r.id === currentRecordId) ?? null;
   const isLocked = currentRecord?.locked ?? false;
 
-  const saveRecord = (nextScores: Record<string, Score>) => {
-    if (isLocked && user.role !== 'admin') return;
-    const record: EvaluationRecord = {
+  const buildEvaluationRecord = (nextScores: Record<string, Score>, locked = isLocked): EvaluationRecord => ({
       id: currentRecordId,
       employeeId,
       employeeName,
       month,
       level,
       role: effectiveRole,
-      locked: isLocked,
+      locked,
       goal,
       challenge,
       reviewPeriod,
@@ -207,8 +205,11 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
       feedback: feedbackText,
       scores: nextScores,
       updatedAt: new Date().toISOString()
-    };
+  });
 
+  const saveRecord = (nextScores: Record<string, Score>) => {
+    if (isLocked && user.role !== 'admin') return;
+    const record = buildEvaluationRecord(nextScores);
     setEvaluations((prev) => [...prev.filter((item) => item.id !== record.id), record]);
     setSavedAt(new Date().toLocaleString());
     apiSaveEvaluation(record).catch(console.error);
@@ -251,12 +252,21 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
   const cancelPendingNavigate = () => setPendingNavigateDirection(null);
 
   const handleToggleLock = async () => {
-    if (!currentRecord) return;
     const nextLocked = !isLocked;
-    await apiLockEvaluation(currentRecord.id, nextLocked).catch(console.error);
-    setEvaluations((prev) =>
-      prev.map((r) => r.id === currentRecord.id ? { ...r, locked: nextLocked } : r)
-    );
+    const record = currentRecord ?? buildEvaluationRecord(scores, false);
+    try {
+      if (!currentRecord) {
+        await apiSaveEvaluation(record);
+      }
+      await apiLockEvaluation(record.id, nextLocked);
+      setEvaluations((prev) => [
+        ...prev.filter((r) => r.id !== record.id),
+        { ...record, locked: nextLocked, updatedAt: new Date().toISOString() }
+      ]);
+      setSavedAt(new Date().toLocaleString());
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const excludedCount = Object.values(scores).filter((score) => score === 'excluded').length;
@@ -361,7 +371,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
           <strong>最終保存</strong>
           {savedAt || 'まだ保存されていません'}
           {isLocked && <div className="locked-badge">🔒 確定済み</div>}
-          {user.role === 'admin' && currentRecord && (
+          {user.role === 'admin' && (
             <button
               type="button"
               className={isLocked ? 'secondary-button' : 'primary-button'}
