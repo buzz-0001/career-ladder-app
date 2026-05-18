@@ -58,17 +58,16 @@ npm run dev
 
 ## Railway MySQL からのデータ移行
 
-既存の Railway MySQL データを Supabase に移す場合（一回限り）:
+既存の Railway MySQL データを Supabase に移す場合は、TablePlus などでCSVエクスポートし、Supabaseへインポートします（一回限り）。
 
 1. Supabase プロジェクトを作成し、`.env` に `DATABASE_URL` を設定
 2. 一度 `npm run dev` または `npm start` でスキーマを作成（または Supabase SQL Editor で `server/migrations/001_initial.sql` を実行）
-3. `.env` に旧 Railway の `MYSQL_URL` を追加
-4. 移行スクリプトを実行:
-
-```bash
-npm run migrate:mysql-to-pg
-```
-
+3. Railway MySQL から以下4テーブルをCSVエクスポート
+   - `users`
+   - `employees`
+   - `evaluations`
+   - `evaluation_scores`
+4. Supabaseへ同じ順序でCSVインポート
 5. Supabase SQL Editor で件数を確認:
 
 ```sql
@@ -78,7 +77,7 @@ UNION ALL SELECT 'evaluations', COUNT(*) FROM evaluations
 UNION ALL SELECT 'evaluation_scores', COUNT(*) FROM evaluation_scores;
 ```
 
-**注意:** 移行スクリプトは移行先の全テーブルを `TRUNCATE` してから投入します。本番 Supabase に既に重要データがある場合は実行前にバックアップしてください。
+**注意:** CSVにはユーザー情報・評価内容が含まれるため、移行後は安全な場所に保管し、不要になった作業ファイルは削除してください。
 
 ## Render へのデプロイ
 

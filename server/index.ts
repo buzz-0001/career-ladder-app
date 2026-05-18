@@ -4,17 +4,24 @@ import dotenv from 'dotenv';
 import OpenAI from 'openai';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import XLSX from 'xlsx';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { pool, initializeDatabase, isUniqueViolation, isRowLocked } from './db.js';
-import type { Category, EvaluationRecord, LadderLevel, Score } from '../src/types';
+import type { EvaluationRecord, LadderLevel, Score } from '../src/types';
 
 dotenv.config();
 
 const app = express();
 const port = Number(process.env.PORT ?? 4000);
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
+if (
+  process.env.NODE_ENV === 'production' &&
+  (!process.env.JWT_SECRET ||
+    process.env.JWT_SECRET === 'dev-secret-change-in-production' ||
+    process.env.JWT_SECRET === 'local-dev-secret-change-in-production')
+) {
+  throw new Error('本番環境では強力な JWT_SECRET を設定してください');
+}
 
 const apiKey = process.env.OPENAI_API_KEY;
 const openai = apiKey ? new OpenAI({ apiKey }) : null;
@@ -29,12 +36,6 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.join(__dirname, '..');
-const MASTER_FILES = ['1_beginner.xlsx', '2_execution.xlsx', '3_leader.xlsx', '4_manage.xlsx'];
-const MANUAL_FILES = ['5_beginner_manual.xlsx', '6_execution_manual.xlsx', '7_leader_manual.xlsx', '8_manage_manual.xlsx'];
-
-// ─── 型定義 ───────────────────────────────────────────────────────────────
-
-type ManualCriteria = { 0: string; 1: string; 2: string };
 
 interface JwtPayload {
   id: number;
@@ -451,113 +452,6 @@ app.delete('/api/admin/employees/:id', authenticate, async (req: AuthRequest, re
     console.error(err);
     res.status(500).json({ error: 'サーバーエラーが発生しました' });
   }
-});
-
-// ─── Excelインポート ──────────────────────────────────────────────────────
-
-function normalizeSheetId(value: string) {
-  return value.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9\-]/g, '').toLowerCase();
-}
-
-function normalizeManualKey(value: string) {
-  return String(value ?? '').trim().replace(/\s+/g, ' ');
-}
-
-function parseExcelSheet(level: number, sheetName: string, rawRows: unknown[][], manualCriteriaMap: Record<string, ManualCriteria>): Category | null {
-  const rows = rawRows.filter((row) => Array.isArray(row) && row.some((cell) => cell != null && String(cell).trim() !== '')) as unknown[][];
-  if (rows.length < 2) return null;
-
-  const header = rows[0].map((value) => String(value ?? '').trim());
-  const findIndexOrDefault = (pattern: RegExp, fallback: number) => {
-    const idx = header.findIndex((col) => pattern.test(col));
-    return idx >= 0 ? idx : fallback;
-  };
-  const titleColumn = findIndexOrDefault(/小項目|項目名|項目/, 1);
-  const criteria0Column = findIndexOrDefault(/0点/, 2);
-  const criteria1Column = findIndexOrDefault(/1点/, 3);
-  const criteria2Column = findIndexOrDefault(/2点/, 4);
-
-  const subItems = rows.slice(1).reduce((acc: Category['subItems'], row) => {
-    const title = String(row[titleColumn] ?? row[0] ?? '').trim();
-    if (!title) return acc;
-
-    const manualKey = normalizeManualKey(title);
-    const manualCriteria = manualCriteriaMap[manualKey];
-    const criteria0 = manualCriteria ? manualCriteria[0] : String(row[criteria0Column] ?? '').trim() || '0点の基準が設定されていません。';
-    const criteria1 = manualCriteria ? manualCriteria[1] : String(row[criteria1Column] ?? '').trim() || '1点の基準が設定されていません。';
-    const criteria2 = manualCriteria ? manualCriteria[2] : String(row[criteria2Column] ?? '').trim() || '2点の基準が設定されていません。';
-    const itemId = normalizeSheetId(`${sheetName}-${acc.length + 1}`);
-
-    acc.push({ id: itemId, title, level: level as LadderLevel, criteria: { 0: criteria0, 1: criteria1, 2: criteria2 } });
-    return acc;
-  }, [] as Category['subItems']);
-
-  if (!subItems.length) return null;
-  return { id: normalizeSheetId(sheetName), title: sheetName, subItems };
-}
-
-async function loadMasterFromExcel(manualCriteriaMap: Record<string, ManualCriteria>): Promise<Category[]> {
-  const categories: Category[] = [];
-  for (const fileName of MASTER_FILES) {
-    try {
-      const filePath = path.join(PROJECT_ROOT, fileName);
-      const workbook = XLSX.readFile(filePath, { cellDates: true, raw: false });
-      const level = Number(fileName[0]) as number;
-      for (const sheetName of workbook.SheetNames) {
-        const worksheet = workbook.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false }) as unknown[][];
-        const category = parseExcelSheet(level, sheetName, rows, manualCriteriaMap);
-        if (category) categories.push(category);
-      }
-    } catch (error) {
-      console.warn(`Failed to parse Excel file ${fileName}:`, error);
-    }
-  }
-  return categories;
-}
-
-async function loadManualCriteria(): Promise<Record<string, ManualCriteria>> {
-  const criteriaMap: Record<string, ManualCriteria> = {};
-  for (const fileName of MANUAL_FILES) {
-    try {
-      const filePath = path.join(PROJECT_ROOT, fileName);
-      const workbook = XLSX.readFile(filePath, { cellDates: true, raw: false });
-      for (const sheetName of workbook.SheetNames) {
-        const worksheet = workbook.Sheets[sheetName];
-        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false }) as unknown[][];
-        if (rows.length < 2) continue;
-
-        const header = rows[0].map((value) => String(value ?? '').trim());
-        const findIndexOrDefault = (pattern: RegExp, fallback: number) => {
-          const idx = header.findIndex((col) => pattern.test(col));
-          return idx >= 0 ? idx : fallback;
-        };
-        const titleColumn = findIndexOrDefault(/項目|Item/, 1);
-        const criteria2Column = findIndexOrDefault(/2点|2点/, 2);
-        const criteria1Column = findIndexOrDefault(/1点|1点/, 3);
-        const criteria0Column = findIndexOrDefault(/0点|0点/, 4);
-
-        for (const row of rows.slice(1)) {
-          const title = normalizeManualKey(String(row[titleColumn] ?? ''));
-          if (!title) continue;
-          criteriaMap[title] = {
-            0: String(row[criteria0Column] ?? '').trim() || '0点の基準が設定されていません。',
-            1: String(row[criteria1Column] ?? '').trim() || '1点の基準が設定されていません。',
-            2: String(row[criteria2Column] ?? '').trim() || '2点の基準が設定されていません。',
-          };
-        }
-      }
-    } catch (error) {
-      console.warn(`Failed to parse manual Excel file ${fileName}:`, error);
-    }
-  }
-  return criteriaMap;
-}
-
-app.get('/api/master/import', async (_req: Request, res: Response) => {
-  const manualCriteriaMap = await loadManualCriteria();
-  const categories = await loadMasterFromExcel(manualCriteriaMap);
-  return res.json({ categories, manualLoaded: Object.keys(manualCriteriaMap).length > 0, sourceFiles: [...MASTER_FILES, ...MANUAL_FILES] });
 });
 
 // ─── AI要約 ───────────────────────────────────────────────────────────────
