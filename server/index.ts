@@ -181,6 +181,16 @@ app.post('/api/evaluations', authenticate, async (req: AuthRequest, res: Respons
       return;
     }
 
+    const existingScoresResult = await client.query(
+      'SELECT item_id, score FROM evaluation_scores WHERE evaluation_id = $1',
+      [record.id]
+    );
+    const scoresToSave: Record<string, Score> = {};
+    for (const s of existingScoresResult.rows) {
+      scoresToSave[s.item_id] = (s.score === 'excluded' ? 'excluded' : Number(s.score)) as Score;
+    }
+    Object.assign(scoresToSave, record.scores);
+
     await client.query('BEGIN');
 
     await client.query(
@@ -219,7 +229,7 @@ app.post('/api/evaluations', authenticate, async (req: AuthRequest, res: Respons
 
     await client.query('DELETE FROM evaluation_scores WHERE evaluation_id = $1', [record.id]);
 
-    for (const [itemId, score] of Object.entries(record.scores)) {
+    for (const [itemId, score] of Object.entries(scoresToSave)) {
       await client.query(
         'INSERT INTO evaluation_scores (evaluation_id, item_id, score) VALUES ($1, $2, $3)',
         [record.id, itemId, String(score)]
