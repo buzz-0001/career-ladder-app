@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ladderLevels } from '../data/master';
 import type { Category, Employee, EvaluationRecord, EvaluationRole, LadderLevel, User } from '../types';
-import { apiLoadEvaluations, apiLockEvaluation } from '../utils/api';
+import { apiDeleteEvaluation, apiLoadEvaluations, apiLockEvaluation } from '../utils/api';
 import { calcCategoryScore, calcTotalScore } from '../utils/scoring';
 
 interface AdminEvaluationListProps {
@@ -29,6 +29,8 @@ function AdminEvaluationList({ employees, categories, user }: AdminEvaluationLis
   const [filterLevel, setFilterLevel] = useState<'' | LadderLevel>('');
   const [filterRole, setFilterRole] = useState<'' | EvaluationRole>('');
   const [filterLocked, setFilterLocked] = useState<'' | 'locked' | 'unlocked'>('');
+  const [deleteTarget, setDeleteTarget] = useState<EvaluationRecord | null>(null);
+  const [deleteError, setDeleteError] = useState('');
 
   // 完了状況フィルタ
   const [statusMonth, setStatusMonth] = useState('');
@@ -64,6 +66,19 @@ function AdminEvaluationList({ employees, categories, user }: AdminEvaluationLis
     const nextLocked = !record.locked;
     await apiLockEvaluation(record.id, nextLocked).catch(console.error);
     setEvaluations((prev) => prev.map((r) => r.id === record.id ? { ...r, locked: nextLocked } : r));
+  };
+
+  const handleDeleteEvaluation = async () => {
+    if (!deleteTarget) return;
+    setDeleteError('');
+    try {
+      await apiDeleteEvaluation(deleteTarget.id);
+      setEvaluations((prev) => prev.filter((r) => r.id !== deleteTarget.id));
+      setDeleteTarget(null);
+    } catch (err) {
+      console.error(err);
+      setDeleteError(err instanceof Error ? err.message : '評価データの削除に失敗しました');
+    }
   };
 
   // ─── 完了状況 ─────────────────────────────────────────────────────────────
@@ -200,7 +215,7 @@ function AdminEvaluationList({ employees, categories, user }: AdminEvaluationLis
             <div className="admin-table-wrapper">
               <table className="admin-table">
                 <thead>
-                  <tr><th>社員名</th><th>評価月</th><th>レベル</th><th>評価者</th><th>状態</th><th>最終更新</th><th>操作</th></tr>
+                  <tr><th>社員名</th><th>評価月</th><th>レベル</th><th>評価者</th><th>状態</th><th>最終更新</th><th>操作</th><th>削除</th></tr>
                 </thead>
                 <tbody>
                   {sorted.map((record) => (
@@ -214,6 +229,20 @@ function AdminEvaluationList({ employees, categories, user }: AdminEvaluationLis
                       <td>
                         <button type="button" className={record.locked ? 'secondary-button' : 'primary-button'} onClick={() => handleToggleLock(record)}>
                           {record.locked ? '🔓 解除' : '🔒 確定'}
+                        </button>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="icon-danger-button"
+                          title="評価データを削除"
+                          aria-label={`${record.employeeName} ${record.month} ${record.role === 'self' ? '本人評価' : '管理者評価'}を削除`}
+                          onClick={() => {
+                            setDeleteError('');
+                            setDeleteTarget(record);
+                          }}
+                        >
+                          🗑️
                         </button>
                       </td>
                     </tr>
@@ -280,6 +309,52 @@ function AdminEvaluationList({ employees, categories, user }: AdminEvaluationLis
             </>
           )}
         </>
+      )}
+      {deleteTarget && (
+        <div className="modal-overlay modal-overlay--warning" onClick={() => setDeleteTarget(null)}>
+          <div
+            className="modal-content modal-content--warning"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-evaluation-title"
+            aria-describedby="delete-evaluation-desc"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header modal-header--warning">
+              <h3 id="delete-evaluation-title" className="modal-warning-title">
+                <span className="modal-warning-title-icon" aria-hidden="true">⚠️</span>
+                評価データの削除
+              </h3>
+              <button
+                type="button"
+                className="close-button close-button--warning"
+                onClick={() => setDeleteTarget(null)}
+                aria-label="削除せず閉じる"
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-warning-body">
+              <p id="delete-evaluation-desc" className="nav-unchecked-confirm-message">
+                本当に消しても良いですか？復元はできません。
+              </p>
+              <div className="delete-target-summary">
+                {deleteTarget.employeeName} / {deleteTarget.month} / {ladderLevels.find((l) => l.value === deleteTarget.level)?.label ?? deleteTarget.level} / {deleteTarget.role === 'self' ? '本人' : '管理者'}
+              </div>
+              {deleteError && <p className="delete-error-message">{deleteError}</p>}
+            </div>
+            <div className="modal-footer modal-footer--warning">
+              <div className="modal-buttons modal-buttons--warning">
+                <button type="button" className="secondary-button" onClick={() => setDeleteTarget(null)}>
+                  元の画面にもどる
+                </button>
+                <button type="button" className="primary-button primary-button--warning-confirm" onClick={handleDeleteEvaluation}>
+                  削除します
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );

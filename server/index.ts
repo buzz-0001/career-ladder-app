@@ -271,6 +271,24 @@ app.put('/api/evaluations/:id/lock', authenticate, async (req: AuthRequest, res:
   }
 });
 
+app.delete('/api/evaluations/:id', authenticate, async (req: AuthRequest, res: Response) => {
+  if (req.user!.role !== 'admin') {
+    res.status(403).json({ error: '管理者のみ評価データを削除できます' });
+    return;
+  }
+  try {
+    const result = await pool.query('DELETE FROM evaluations WHERE id = $1', [req.params.id]);
+    if (result.rowCount === 0) {
+      res.status(404).json({ error: '評価レコードが見つかりません' });
+      return;
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'サーバーエラーが発生しました' });
+  }
+});
+
 // ─── ユーザー管理（管理者専用） ───────────────────────────────────────────
 
 app.get('/api/admin/users', authenticate, async (req: AuthRequest, res: Response) => {

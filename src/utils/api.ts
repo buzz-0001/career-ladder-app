@@ -70,6 +70,14 @@ export async function apiLockEvaluation(id: string, locked: boolean): Promise<vo
   await handleResponse(res);
 }
 
+export async function apiDeleteEvaluation(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/evaluations/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  await handleResponse(res);
+}
+
 // ─── ユーザー管理 ─────────────────────────────────────────────────────────
 
 export async function apiGetUsers(): Promise<AdminUser[]> {
