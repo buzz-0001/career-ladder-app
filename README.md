@@ -85,7 +85,7 @@ UNION ALL SELECT 'evaluation_scores', COUNT(*) FROM evaluation_scores;
 1. GitHub リポジトリを Render に連携
 2. **New → Web Service** を作成
 3. 設定:
-   - **Build Command:** `npm install && npm run build`
+   - **Build Command:** `npm install --include=dev && npm run build`
    - **Start Command:** `npm start`
 4. 環境変数を設定:
    - `DATABASE_URL` … Supabase の **Transaction pooler**（ポート 6543, `?pgbouncer=true`）

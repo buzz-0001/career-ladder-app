@@ -5,7 +5,8 @@ services:
     name: career-ladder-app
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build
+    # NODE_ENV=production でも Vite などのビルド用依存を入れる
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_ENV
