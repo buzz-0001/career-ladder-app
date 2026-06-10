@@ -16,7 +16,7 @@
 | 役割 | サービス |
 |------|----------|
 | データベース | [Supabase](https://supabase.com)（PostgreSQL） |
-| アプリホスティング | [Render](https://render.com) Web Service |
+| アプリホスティング | [Railway](https://railway.com)（Hobby プラン） |
 
 ## ローカル開発
 
@@ -79,21 +79,21 @@ UNION ALL SELECT 'evaluation_scores', COUNT(*) FROM evaluation_scores;
 
 **注意:** CSVにはユーザー情報・評価内容が含まれるため、移行後は安全な場所に保管し、不要になった作業ファイルは削除してください。
 
-## Render へのデプロイ
+## Railway へのデプロイ
 
-1. GitHub リポジトリを Render に連携
-2. **New → Web Service** を作成
-3. 設定:
-   - **Build Command:** `npm install --include=dev && npm run build`
-   - **Start Command:** `npm start`
-4. 環境変数を設定:
+ビルド・起動コマンドはリポジトリ直下の [`railway.json`](railway.json) から自動で読み込まれます。
+
+1. [Railway](https://railway.com) にログインし、**Hobby プラン**（$5/月）にアップグレード
+2. **New Project → Deploy from GitHub repo** で本リポジトリを選択
+3. **Variables** タブで環境変数を設定:
    - `DATABASE_URL` … Supabase の **Transaction pooler**（ポート 6543, `?pgbouncer=true`）
-   - `JWT_SECRET` … 強力なランダム文字列
+   - `JWT_SECRET` … 強力なランダム文字列（移行時は旧環境と同じ値にすると再ログイン不要）
    - `NODE_ENV` … `production`
    - `OPENAI_API_KEY` … 任意
-5. デプロイ後、Render の URL でログイン・評価保存を手動テスト
-
-リポジトリ直下の [`render.yaml`](render.yaml) を Blueprint として使うこともできます。
+   - `PORT` は Railway が自動注入するため設定不要
+4. **Settings → Region** を `Southeast Asia (Singapore)` に設定（Supabase 東京に近い）
+5. **Settings → Networking → Generate Domain** で公開 URL を発行
+6. 発行された URL でログイン・評価保存を手動テスト
 
 ### デプロイ後の確認項目
 
@@ -102,16 +102,16 @@ UNION ALL SELECT 'evaluation_scores', COUNT(*) FROM evaluation_scores;
 - [ ] 管理者のユーザー・社員 CRUD
 - [ ] AI 要約（API キー設定時）
 
-## Railway からの切り替え
+## Render からの切り替え
 
-1. Supabase + Render で動作確認が取れたら、Railway の MySQL / アプリサービスを停止
-2. 1 週間程度は Railway のバックアップを保持（ロールバック用）
-3. 問題なければ Railway プロジェクトを削除
+1. Supabase + Railway で動作確認が取れたら、Render の Web Service を一時停止（Suspend）
+2. 社内に新しい URL を周知
+3. 数週間問題なければ Render サービスを削除
 
 ## API について
 
 `/api/summary` に評価データを送信して要約を生成します。OpenAI API キーが設定されていない場合は、プレースホルダーのメッセージを返します。
 
-## 旧 Railway 設定
+## 旧 Render 設定
 
-`railway.json` は旧 Railway デプロイ用の設定です。Render / Supabase 移行後は使用しません。
+`render.yaml` は旧 Render デプロイ用の Blueprint です。Railway 移行後は使用しません。
