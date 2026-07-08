@@ -398,6 +398,21 @@ function Dashboard({ employeeId, onEmployeeChange, categories, employees, user }
             <span className="comment-interview-month-label">面談月</span>
             <span>{formatMonthLabel(effectiveMonth)}</span>
           </div>
+          <div className="comment-section-header">3か月後の目標</div>
+          <div className="comment-two-col">
+            <div className="comment-cell">
+              <div className="comment-cell-label">本人</div>
+              <div className="comment-cell-text">
+                {monthSelfRecord?.goal || <span className="comment-cell-empty">まだ記入されていません</span>}
+              </div>
+            </div>
+            <div className="comment-cell">
+              <div className="comment-cell-label">管理者</div>
+              <div className="comment-cell-text">
+                {monthAdminRecord?.goal || <span className="comment-cell-empty">まだ記入されていません</span>}
+              </div>
+            </div>
+          </div>
           <div className="comment-section-header">今後挑戦したいこと / 挑戦してほしいこと</div>
           <div className="comment-two-col">
             <div className="comment-cell">
