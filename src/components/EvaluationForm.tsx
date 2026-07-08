@@ -49,8 +49,12 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
   const [currentCategoryIndex, setCurrentCategoryIndex] = useState(0);
   const [pendingNavigateDirection, setPendingNavigateDirection] = useState<'prev' | 'next' | null>(null);
   const [saveError, setSaveError] = useState('');
+  const [evaluationsLoaded, setEvaluationsLoaded] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const modalContentRef = useRef<HTMLDivElement>(null);
   const modalItemsRef = useRef<HTMLDivElement>(null);
+  // 保存を直列化するためのキュー（同時保存によるサーバー側の衝突・順序逆転を防ぐ）
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const effectiveRole = user.role === 'self' ? 'self' as const : role;
   const currentRecordId = useMemo(
@@ -59,10 +63,21 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
   );
 
   useEffect(() => {
-    apiLoadEvaluations().then(setEvaluations).catch(console.error);
+    apiLoadEvaluations()
+      .then((records) => {
+        setEvaluations(records);
+        setLoadError('');
+      })
+      .catch((err) => {
+        console.error(err);
+        setLoadError('保存済みデータの読み込みに失敗しました。ページを再読み込みするか、再ログインしてください。');
+      })
+      .finally(() => setEvaluationsLoaded(true));
   }, []);
 
   useEffect(() => {
+    // 読み込み完了前に空データでフォームをリセットすると、入力済みの採点が画面から消えてしまう
+    if (!evaluationsLoaded) return;
     const existing = evaluations.find((record) => record.id === currentRecordId);
     if (existing) {
       setScores(existing.scores);
@@ -81,7 +96,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
       setTeamOpinion('');
       setFeedbackText('');
     }
-  }, [currentRecordId, evaluations]);
+  }, [currentRecordId, evaluations, evaluationsLoaded]);
 
   useEffect(() => {
     if (modalOpen && modalItemsRef.current) {
@@ -208,12 +223,18 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
       updatedAt: new Date().toISOString()
   });
 
+  /** 採点・保存が可能な状態か（データ読み込み完了かつ対象者が確定している） */
+  const scoringReady = evaluationsLoaded && !loadError && employeeId !== '';
+
   const saveRecord = (nextScores: Record<string, Score>) => {
     if (isLocked && user.role !== 'admin') return;
+    if (!scoringReady) return;
     const record = buildEvaluationRecord(nextScores);
     setEvaluations((prev) => [...prev.filter((item) => item.id !== record.id), record]);
     setSaveError('');
-    apiSaveEvaluation(record)
+    // 前の保存が終わってから次を送ることで、同時保存の衝突と順序の逆転を防ぐ
+    saveQueueRef.current = saveQueueRef.current
+      .then(() => apiSaveEvaluation(record))
       .then(() => setSavedAt(new Date().toLocaleString()))
       .catch((err) => {
         console.error(err);
@@ -300,6 +321,9 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
           昇格基準
         </button>
       </div>
+
+      {!evaluationsLoaded && <div className="loading-banner">保存済みデータを読み込んでいます…（読み込み完了まで採点できません）</div>}
+      {loadError && <div className="error-banner">{loadError}</div>}
 
       <div className="input-row">
         <div className="field">
@@ -538,8 +562,8 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
                   ) : null}
                 </h3>
                 <div className="category-actions">
-                  <button type="button" className="primary-button" onClick={() => openModal(index)}>
-                    採点する
+                  <button type="button" className="primary-button" disabled={!scoringReady} onClick={() => openModal(index)}>
+                    {scoringReady ? '採点する' : '読み込み中…'}
                   </button>
                   <div className="category-score-summary">
                     <span>{categoryScore.total} / {categoryScore.max}点</span>
@@ -602,6 +626,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
               ))}
             </div>
             <div className="modal-footer">
+              {saveError && <div className="error-text save-error-text modal-save-error">{saveError}</div>}
               <div className="score-summary">
                 <div>採点項目数: {currentCategoryDetails.filter(item => scores[item.id] !== 'excluded').length}</div>
                 <div>合計点数: {currentCategoryDetails.reduce((sum, item) => {

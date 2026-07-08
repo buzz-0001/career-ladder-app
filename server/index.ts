@@ -184,16 +184,6 @@ app.post('/api/evaluations', authenticate, async (req: AuthRequest, res: Respons
       return;
     }
 
-    const existingScoresResult = await client.query(
-      'SELECT item_id, score FROM evaluation_scores WHERE evaluation_id = $1',
-      [record.id]
-    );
-    const scoresToSave: Record<string, Score> = {};
-    for (const s of existingScoresResult.rows) {
-      scoresToSave[s.item_id] = (s.score === 'excluded' ? 'excluded' : Number(s.score)) as Score;
-    }
-    Object.assign(scoresToSave, record.scores);
-
     await client.query('BEGIN');
 
     await client.query(
@@ -230,11 +220,11 @@ app.post('/api/evaluations', authenticate, async (req: AuthRequest, res: Respons
       ]
     );
 
-    await client.query('DELETE FROM evaluation_scores WHERE evaluation_id = $1', [record.id]);
-
-    for (const [itemId, score] of Object.entries(scoresToSave)) {
+    // 全削除→再挿入だと同時保存が主キー衝突で失敗しデータが失われるため、項目ごとの UPSERT にする
+    for (const [itemId, score] of Object.entries(record.scores ?? {})) {
       await client.query(
-        'INSERT INTO evaluation_scores (evaluation_id, item_id, score) VALUES ($1, $2, $3)',
+        `INSERT INTO evaluation_scores (evaluation_id, item_id, score) VALUES ($1, $2, $3)
+         ON CONFLICT (evaluation_id, item_id) DO UPDATE SET score = EXCLUDED.score`,
         [record.id, itemId, String(score)]
       );
     }
