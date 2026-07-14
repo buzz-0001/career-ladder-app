@@ -454,6 +454,20 @@
   margin-bottom: 12px;
 }
 
+/* 保存キューの状態表示（最終保存カード内） */
+.save-status-saving {
+  color: #b45309;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.save-status-done {
+  color: #15803d;
+  font-weight: 700;
+  font-size: 0.78rem;
+  margin-top: 4px;
+}
+
 .import-card {
   display: grid;
   gap: 16px;

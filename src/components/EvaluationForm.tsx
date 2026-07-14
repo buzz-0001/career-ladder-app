@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef, useSyncExternalStore } from 'react';
 import { ladderLevels } from '../data/master';
 import { EvaluationRecord, EvaluationRole, Employee, LadderLevel, Score, User, Category } from '../types';
 import { apiLoadEvaluations, apiSaveEvaluation, apiLockEvaluation } from '../utils/api';
+import { enqueueSave, getSaveQueueSnapshot, mergeWithLocalRecords, subscribeSaveQueue } from '../utils/saveQueue';
 
 interface EvaluationFormProps {
   employeeId: string;
@@ -38,7 +39,6 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
   const [role, setRole] = useState<EvaluationRole>('self');
   const [scores, setScores] = useState<Record<string, Score>>({});
   const [goal, setGoal] = useState('');
-  const [savedAt, setSavedAt] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [showPromotion, setShowPromotion] = useState(false);
   const [challenge, setChallenge] = useState('');
@@ -48,13 +48,17 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
   const [feedbackText, setFeedbackText] = useState('');
   const [currentCategoryIndex, setCurrentCategoryIndex] = useState(0);
   const [pendingNavigateDirection, setPendingNavigateDirection] = useState<'prev' | 'next' | null>(null);
-  const [saveError, setSaveError] = useState('');
+  const [lockError, setLockError] = useState('');
   const [evaluationsLoaded, setEvaluationsLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
   const modalContentRef = useRef<HTMLDivElement>(null);
   const modalItemsRef = useRef<HTMLDivElement>(null);
-  // 保存を直列化するためのキュー（同時保存によるサーバー側の衝突・順序逆転を防ぐ）
-  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  // React の state 更新は非同期のため、素早い連打でも直前のチェックを取りこぼさないよう最新スコアを ref でも保持する
+  const scoresRef = useRef<Record<string, Score>>({});
+
+  // 保存キューの状態（保存中か・エラー・最終保存時刻）を購読して表示に使う
+  const saveQueueState = useSyncExternalStore(subscribeSaveQueue, getSaveQueueSnapshot);
+  const saveError = saveQueueState.errorMessage || lockError;
 
   const effectiveRole = user.role === 'self' ? 'self' as const : role;
   const currentRecordId = useMemo(
@@ -65,7 +69,8 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
   useEffect(() => {
     apiLoadEvaluations()
       .then((records) => {
-        setEvaluations(records);
+        // 保存が完了する前に画面を戻った場合でも、未保存のローカルデータを優先して表示する
+        setEvaluations(mergeWithLocalRecords(records));
         setLoadError('');
       })
       .catch((err) => {
@@ -80,6 +85,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
     if (!evaluationsLoaded) return;
     const existing = evaluations.find((record) => record.id === currentRecordId);
     if (existing) {
+      scoresRef.current = existing.scores;
       setScores(existing.scores);
       setGoal(existing.goal ?? '');
       setChallenge(existing.challenge ?? '');
@@ -88,6 +94,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
       setTeamOpinion(existing.teamOpinion ?? '');
       setFeedbackText(existing.feedback ?? '');
     } else {
+      scoresRef.current = {};
       setScores({});
       setGoal('');
       setChallenge('');
@@ -231,22 +238,16 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
     if (!scoringReady) return;
     const record = buildEvaluationRecord(nextScores);
     setEvaluations((prev) => [...prev.filter((item) => item.id !== record.id), record]);
-    setSaveError('');
-    // 前の保存が終わってから次を送ることで、同時保存の衝突と順序の逆転を防ぐ
-    saveQueueRef.current = saveQueueRef.current
-      .then(() => apiSaveEvaluation(record))
-      .then(() => setSavedAt(new Date().toLocaleString()))
-      .catch((err) => {
-        console.error(err);
-        setSaveError(err instanceof Error ? err.message : '保存に失敗しました。通信状態を確認してください。');
-      });
+    // 保存マネージャが最新状態1件に集約して送信する（滞留・順序逆転・二重送信を防ぐ）
+    enqueueSave(record);
   };
 
   const handleScoreChange = (subItemId: string, value: Score) => {
     const nextScores = {
-      ...scores,
+      ...scoresRef.current,
       [subItemId]: value
     };
+    scoresRef.current = nextScores;
     setScores(nextScores);
     saveRecord(nextScores);
   };
@@ -263,7 +264,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
   };
 
   const onSaveAndNavigate = (direction: 'prev' | 'next') => {
-    saveRecord(scores);
+    saveRecord(scoresRef.current);
     if (shouldWarnUncheckedOnNavigate && currentModalCategoryUncheckedCount > 0) {
       setPendingNavigateDirection(direction);
       return;
@@ -280,21 +281,20 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
 
   const handleToggleLock = async () => {
     const nextLocked = !isLocked;
-    const record = currentRecord ?? buildEvaluationRecord(scores, false);
+    const record = currentRecord ?? buildEvaluationRecord(scoresRef.current, false);
     try {
       if (!currentRecord) {
         await apiSaveEvaluation(record);
       }
       await apiLockEvaluation(record.id, nextLocked);
-      setSaveError('');
+      setLockError('');
       setEvaluations((prev) => [
         ...prev.filter((r) => r.id !== record.id),
         { ...record, locked: nextLocked, updatedAt: new Date().toISOString() }
       ]);
-      setSavedAt(new Date().toLocaleString());
     } catch (err) {
       console.error(err);
-      setSaveError(err instanceof Error ? err.message : '確定操作に失敗しました。通信状態を確認してください。');
+      setLockError(err instanceof Error ? err.message : '確定操作に失敗しました。通信状態を確認してください。');
     }
   };
 
@@ -401,7 +401,16 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
         </div>
         <div className="stat-card">
           <strong>最終保存</strong>
-          {savedAt || 'まだ保存されていません'}
+          {saveQueueState.saving ? (
+            <div className="save-status-saving">保存中です…（完了までページを閉じないでください）</div>
+          ) : saveQueueState.lastSavedAt ? (
+            <>
+              {saveQueueState.lastSavedAt}
+              <div className="save-status-done">すべて保存済み</div>
+            </>
+          ) : (
+            'まだ保存されていません'
+          )}
           {isLocked && <div className="locked-badge">🔒 確定済み</div>}
           {saveError && <div className="error-text save-error-text">{saveError}</div>}
           {user.role === 'admin' && (
@@ -438,7 +447,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
           className="goal-textarea"
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
-          onBlur={() => saveRecord(scores)}
+          onBlur={() => saveRecord(scoresRef.current)}
           placeholder="3か月後に達成したい目標を記入してください"
           disabled={isLocked && user.role !== 'admin'}
           rows={3}
@@ -453,7 +462,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
             className="goal-textarea"
             value={challenge}
             onChange={(e) => setChallenge(e.target.value)}
-            onBlur={() => saveRecord(scores)}
+            onBlur={() => saveRecord(scoresRef.current)}
             placeholder="今後挑戦したいことを記入してください"
             disabled={isLocked}
             rows={3}
@@ -473,7 +482,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
             className="goal-textarea"
             value={reviewPeriod}
             onChange={(e) => setReviewPeriod(e.target.value)}
-            onBlur={() => saveRecord(scores)}
+            onBlur={() => saveRecord(scoresRef.current)}
             placeholder="この評価期間を振り返って感じたこと・気づきを記入してください"
             disabled={isLocked}
             rows={3}
@@ -494,7 +503,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
               className="goal-textarea"
               value={adminChallenge}
               onChange={(e) => setAdminChallenge(e.target.value)}
-              onBlur={() => saveRecord(scores)}
+              onBlur={() => saveRecord(scoresRef.current)}
               placeholder="今後挑戦してほしいことを記入してください"
               rows={3}
             />
@@ -505,7 +514,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
               className="goal-textarea"
               value={teamOpinion}
               onChange={(e) => setTeamOpinion(e.target.value)}
-              onBlur={() => saveRecord(scores)}
+              onBlur={() => saveRecord(scoresRef.current)}
               placeholder="チーム・会社への意見や相談を記入してください"
               rows={3}
             />
@@ -516,7 +525,7 @@ function EvaluationForm({ employeeId, employeeName, onEmployeeChange, categories
               className="goal-textarea"
               value={feedbackText}
               onChange={(e) => setFeedbackText(e.target.value)}
-              onBlur={() => saveRecord(scores)}
+              onBlur={() => saveRecord(scoresRef.current)}
               placeholder="フィードバック内容を記入してください"
               rows={3}
             />
